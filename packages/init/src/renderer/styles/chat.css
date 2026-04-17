@@ -1,0 +1,82 @@
+/* Shared chat view styles - used by both orchestrator and standalone chat view */
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes pulse-subtle {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.text-shimmer {
+  animation: shimmer 3.5s ease-in-out infinite;
+}
+
+/* Force all code/diff rendering to inherit font size from parent.
+   Each mode sets its own text size — everything inside must follow. */
+.sd-inline-code,
+[data-streamdown] code:not(pre code) {
+  font-size: inherit !important;
+  line-height: inherit;
+}
+
+/* Streamdown code blocks — the wrapper div, .language-* wrapper, and pre/code inside it */
+[data-streamdown="code-block-body"],
+[data-streamdown] [class*="language-"],
+[data-streamdown] pre,
+[data-streamdown] pre code {
+  font-size: inherit !important;
+}
+
+/* Prevent code blocks from overflowing the chat container */
+[data-streamdown] pre {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+[data-streamdown] [class*="language-"] {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+[data-streamdown] code {
+  word-break: break-all;
+}
+
+[data-streamdown] pre code {
+  word-break: normal;
+}
+
+/* Pierre diffs */
+diffs-container {
+  font-size: inherit !important;
+}
+diffs-container pre,
+diffs-container code {
+  font-size: inherit !important;
+}

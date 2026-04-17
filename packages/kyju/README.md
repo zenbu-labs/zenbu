@@ -1,0 +1,1 @@
+a tiny, extendible, typescript database

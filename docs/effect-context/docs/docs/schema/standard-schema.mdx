@@ -1,0 +1,132 @@
+---
+title: Schema to Standard Schema
+description: Generate Standard Schema V1.
+sidebar:
+  label: Standard Schema
+  order: 14
+---
+
+import { Aside } from "@astrojs/starlight/components"
+
+The `Schema.standardSchemaV1` API allows you to generate a [Standard Schema v1](https://standardschema.dev/) object from an Effect `Schema`.
+
+**Example** (Generating a Standard Schema V1)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const schema = Schema.Struct({
+  name: Schema.String
+})
+
+// Convert an Effect schema into a Standard Schema V1 object
+//
+//      ┌─── StandardSchemaV1<{ readonly name: string; }>
+//      ▼
+const standardSchema = Schema.standardSchemaV1(schema)
+```
+
+<Aside type="note" title="Schema Restrictions">
+  Only schemas that do not have dependencies (i.e., `R = never`) can be
+  converted to a Standard Schema V1 object.
+</Aside>
+
+## Sync vs Async Validation
+
+The `Schema.standardSchemaV1` API creates a schema whose `validate` method attempts to decode and validate the provided input synchronously. If the underlying `Schema` includes any asynchronous components (e.g., asynchronous message resolutions
+or checks), then validation will necessarily return a `Promise` instead.
+
+**Example** (Handling Synchronous and Asynchronous Validation)
+
+```ts twoslash
+import { Effect, Schema } from "effect"
+
+// Utility function to display sync and async results
+const print = <T>(t: T) =>
+  t instanceof Promise
+    ? t.then((x) => console.log("Promise", JSON.stringify(x, null, 2)))
+    : console.log("Value", JSON.stringify(t, null, 2))
+
+// Define a synchronous schema
+const sync = Schema.Struct({
+  name: Schema.String
+})
+
+// Generate a Standard Schema V1 object
+const syncStandardSchema = Schema.standardSchemaV1(sync)
+
+// Validate synchronously
+print(syncStandardSchema["~standard"].validate({ name: null }))
+/*
+Output:
+{
+  "issues": [
+    {
+      "path": [
+        "name"
+      ],
+      "message": "Expected string, actual null"
+    }
+  ]
+}
+*/
+
+// Define an asynchronous schema with a transformation
+const async = Schema.transformOrFail(
+  sync,
+  Schema.Struct({
+    name: Schema.NonEmptyString
+  }),
+  {
+    // Simulate an asynchronous validation delay
+    decode: (x) => Effect.sleep("100 millis").pipe(Effect.as(x)),
+    encode: Effect.succeed
+  }
+)
+
+// Generate a Standard Schema V1 object
+const asyncStandardSchema = Schema.standardSchemaV1(async)
+
+// Validate asynchronously
+print(asyncStandardSchema["~standard"].validate({ name: "" }))
+/*
+Output:
+Promise {
+  "issues": [
+    {
+      "path": [
+        "name"
+      ],
+      "message": "Expected a non empty string, actual \"\""
+    }
+  ]
+}
+*/
+```
+
+## Defects
+
+If an unexpected defect occurs during validation, it is reported as a single issue without a `path`. This ensures that unexpected errors do not disrupt schema validation but are still captured and reported.
+
+**Example** (Handling Defects)
+
+```ts twoslash
+import { Effect, Schema } from "effect"
+
+// Define a schema with a defect in the decode function
+const defect = Schema.transformOrFail(Schema.String, Schema.String, {
+  // Simulate an internal failure
+  decode: () => Effect.die("Boom!"),
+  encode: Effect.succeed
+})
+
+// Generate a Standard Schema V1 object
+const defectStandardSchema = Schema.standardSchemaV1(defect)
+
+// Validate input, triggering a defect
+console.log(defectStandardSchema["~standard"].validate("a"))
+/*
+Output:
+{ issues: [ { message: 'Error: Boom!' } ] }
+*/
+```

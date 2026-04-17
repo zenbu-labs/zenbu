@@ -1,0 +1,54 @@
+{
+	"name": "dynohot",
+	"private": true,
+	"type": "module",
+	"version": "2.1.1",
+	"exports": {
+		".": "./dist/loader/dispatch.js",
+		"./loader": "./dist/loader/loader.js",
+		"./register": "./dist/loader/register.js",
+		"./*": {
+			"import": "./dist/*.js",
+			"types": "./dist/*.d.ts"
+		}
+	},
+	"imports": {
+		"#dynohot/*": "./dist/*.js",
+		"#port": "./dist/runtime/port.js"
+	},
+	"scripts": {
+		"lint": "eslint --max-warnings=0 --report-unused-disable-directives .",
+		"prepare": "rm -rf dist && tsc -b",
+		"test": "node --no-warnings --experimental-vm-modules --enable-source-maps --test-reporter=spec --test 'dist/__tests__/**/*.js'"
+	},
+	"dependencies": {
+		"@babel/core": "^7.26.9",
+		"@babel/generator": "^7.26.9",
+		"@babel/traverse": "^7.26.9",
+		"@braidai/lang": "^1.0.0",
+		"convert-source-map": "^2.0.0",
+		"tslib": "^2.8.1"
+	},
+	"devDependencies": {
+		"@babel/plugin-proposal-explicit-resource-management": "^7.25.9",
+		"@babel/preset-env": "^7.26.9",
+		"@babel/preset-typescript": "^7.26.0",
+		"@braidai/eslintrc": "^1.2.0",
+		"@changesets/cli": "^2.28.1",
+		"@types/babel__core": "^7.20.5",
+		"@types/babel__generator": "^7.6.8",
+		"@types/babel__traverse": "^7.20.6",
+		"@types/convert-source-map": "^2.0.3",
+		"@types/node": "^22.13.4",
+		"babel-plugin-transform-import-meta": "^2.3.2",
+		"eslint": "^9.20.1",
+		"typescript": "^5.7.3"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/laverdet/dynohot.git"
+	},
+	"author": "https://github.com/laverdet",
+	"license": "ISC",
+	"homepage": "https://github.com/laverdet/dynohot#readme"
+}

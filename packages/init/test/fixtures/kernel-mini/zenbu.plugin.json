@@ -1,0 +1,5 @@
+{
+  "name": "kernel",
+  "schema": "./schema.ts",
+  "migrations": "./kyju/index.ts"
+}

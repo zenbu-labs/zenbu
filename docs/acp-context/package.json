@@ -1,0 +1,15 @@
+{
+  "name": "@acp/context",
+  "version": "0.0.1",
+  "description": "ACP (Agent Context Protocol) documentation and examples",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  }
+}

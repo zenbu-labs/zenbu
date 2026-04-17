@@ -1,0 +1,3 @@
+# Silence noisy npm bookkeeping.
+# Tip: Pass --text to `diff` or `show` to inspect contents.
+package-lock.json linguist-generated binary

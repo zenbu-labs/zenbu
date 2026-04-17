@@ -1,0 +1,703 @@
+---
+title: Error Messages
+description: Customize and enhance error messages for schema decoding with default, refined, and custom messages.
+sidebar:
+  order: 9
+---
+
+## Default Error Messages
+
+By default, when a parsing error occurs, the system automatically generates an informative message based on the schema's structure and the nature of the error (see [TreeFormatter](/docs/schema/error-formatters/#treeformatter-default) for more informations).
+For example, if a required property is missing or a data type does not match, the error message will clearly state the expectation versus the actual input.
+
+**Example** (Type Mismatch)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const Person = Schema.Struct({
+  name: Schema.String,
+  age: Schema.Number
+})
+
+Schema.decodeUnknownSync(Person)(null)
+// Output: ParseError: Expected { readonly name: string; readonly age: number }, actual null
+```
+
+**Example** (Missing Properties)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const Person = Schema.Struct({
+  name: Schema.String,
+  age: Schema.Number
+})
+
+Schema.decodeUnknownSync(Person)({}, { errors: "all" })
+/*
+throws:
+ParseError: { readonly name: string; readonly age: number }
+├─ ["name"]
+│  └─ is missing
+└─ ["age"]
+   └─ is missing
+*/
+```
+
+**Example** (Incorrect Property Type)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const Person = Schema.Struct({
+  name: Schema.String,
+  age: Schema.Number
+})
+
+Schema.decodeUnknownSync(Person)(
+  { name: null, age: "age" },
+  { errors: "all" }
+)
+/*
+throws:
+ParseError: { readonly name: string; readonly age: number }
+├─ ["name"]
+│  └─ Expected string, actual null
+└─ ["age"]
+   └─ Expected number, actual "age"
+*/
+```
+
+### Enhancing Clarity in Error Messages with Identifiers
+
+In scenarios where a schema has multiple fields or nested structures, the default error messages can become overly complex and verbose.
+To address this, you can enhance the clarity and brevity of these messages by utilizing annotations such as `identifier`, `title`, and `description`.
+
+**Example** (Using Identifiers for Clarity)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const Name = Schema.String.annotations({ identifier: "Name" })
+
+const Age = Schema.Number.annotations({ identifier: "Age" })
+
+const Person = Schema.Struct({
+  name: Name,
+  age: Age
+}).annotations({ identifier: "Person" })
+
+Schema.decodeUnknownSync(Person)(null)
+/*
+throws:
+ParseError: Expected Person, actual null
+*/
+
+Schema.decodeUnknownSync(Person)({}, { errors: "all" })
+/*
+throws:
+ParseError: Person
+├─ ["name"]
+│  └─ is missing
+└─ ["age"]
+   └─ is missing
+*/
+
+Schema.decodeUnknownSync(Person)(
+  { name: null, age: null },
+  { errors: "all" }
+)
+/*
+throws:
+ParseError: Person
+├─ ["name"]
+│  └─ Expected Name, actual null
+└─ ["age"]
+   └─ Expected Age, actual null
+*/
+```
+
+### Refinements
+
+When a refinement fails, the default error message indicates whether the failure occurred in the "from" part or within the predicate defining the refinement:
+
+**Example** (Refinement Errors)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const Name = Schema.NonEmptyString.annotations({ identifier: "Name" })
+
+const Age = Schema.Positive.pipe(Schema.int({ identifier: "Age" }))
+
+const Person = Schema.Struct({
+  name: Name,
+  age: Age
+}).annotations({ identifier: "Person" })
+
+// From side failure
+Schema.decodeUnknownSync(Person)({ name: null, age: 18 })
+/*
+throws:
+ParseError: Person
+└─ ["name"]
+   └─ Name
+      └─ From side refinement failure
+         └─ Expected string, actual null
+*/
+
+// Predicate refinement failure
+Schema.decodeUnknownSync(Person)({ name: "", age: 18 })
+/*
+throws:
+ParseError: Person
+└─ ["name"]
+   └─ Name
+      └─ Predicate refinement failure
+         └─ Expected a non empty string, actual ""
+*/
+```
+
+In the first example, the error message indicates a "from side" refinement failure in the `name` property, specifying that a string was expected but received `null`.
+In the second example, a "predicate" refinement failure is reported, indicating that a non-empty string was expected for `name` but an empty string was provided.
+
+### Transformations
+
+Transformations between different types or formats can occasionally result in errors.
+The system provides a structured error message to specify where the error occurred:
+
+- **Encoded Side Failure:** Errors on this side typically indicate that the input to the transformation does not match the expected initial type or format. For example, receiving a `null` when a `string` is expected.
+- **Transformation Process Failure:** This type of error arises when the transformation logic itself fails, such as when the input does not meet the criteria specified within the transformation functions.
+- **Type Side Failure:** Occurs when the output of a transformation does not meet the schema requirements on the decoded side. This can happen if the transformed value fails subsequent validations or conditions.
+
+**Example** (Transformation Errors)
+
+```ts twoslash
+import { ParseResult, Schema } from "effect"
+
+const schema = Schema.transformOrFail(
+  Schema.String,
+  Schema.String.pipe(Schema.minLength(2)),
+  {
+    strict: true,
+    decode: (s, _, ast) =>
+      s.length > 0
+        ? ParseResult.succeed(s)
+        : ParseResult.fail(new ParseResult.Type(ast, s)),
+    encode: ParseResult.succeed
+  }
+)
+
+// Encoded side failure
+Schema.decodeUnknownSync(schema)(null)
+/*
+throws:
+ParseError: (string <-> minLength(2))
+└─ Encoded side transformation failure
+   └─ Expected string, actual null
+*/
+
+// transformation failure
+Schema.decodeUnknownSync(schema)("")
+/*
+throws:
+ParseError: (string <-> minLength(2))
+└─ Transformation process failure
+   └─ Expected (string <-> minLength(2)), actual ""
+*/
+
+// Type side failure
+Schema.decodeUnknownSync(schema)("a")
+/*
+throws:
+ParseError: (string <-> minLength(2))
+└─ Type side transformation failure
+   └─ minLength(2)
+      └─ Predicate refinement failure
+         └─ Expected a string at least 2 character(s) long, actual "a"
+*/
+```
+
+## Custom Error Messages
+
+You have the capability to define custom error messages specifically tailored for different parts of your schema using the `message` annotation.
+This allows developers to provide more context-specific feedback which can improve the debugging and validation processes.
+
+Here's an overview of the `MessageAnnotation` type, which you can use to craft these messages:
+
+```ts showLineNumbers=false
+type MessageAnnotation = (issue: ParseIssue) =>
+  | string
+  | Effect<string>
+  | {
+      readonly message: string | Effect<string>
+      readonly override: boolean
+    }
+```
+
+| Return Type                            | Description                                                                                                                                                                                                                                                  |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `string`                               | Provides a static message that directly describes the error.                                                                                                                                                                                                 |
+| `Effect<string>`                       | Utilizes dynamic messages that can incorporate results from **synchronous** processes or rely on **optional** dependencies.                                                                                                                                  |
+| Object (with `message` and `override`) | Allows you to define a specific error message along with a boolean flag (`override`). This flag determines if the custom message should supersede any default or nested custom messages, providing precise control over the error output displayed to users. |
+
+**Example** (Adding a Custom Error Message to a String Schema)
+
+```ts twoslash
+import { Schema } from "effect"
+
+// Define a string schema without a custom message
+const MyString = Schema.String
+
+// Attempt to decode `null`, resulting in a default error message
+Schema.decodeUnknownSync(MyString)(null)
+/*
+throws:
+ParseError: Expected string, actual null
+*/
+
+// Define a string schema with a custom error message
+const MyStringWithMessage = Schema.String.annotations({
+  message: () => "not a string"
+})
+
+// Decode with the custom schema, showing the new error message
+Schema.decodeUnknownSync(MyStringWithMessage)(null)
+/*
+throws:
+ParseError: not a string
+*/
+```
+
+**Example** (Custom Error Message for a Union Schema with Override Option)
+
+```ts twoslash "override: true"
+import { Schema } from "effect"
+
+// Define a union schema without a custom message
+const MyUnion = Schema.Union(Schema.String, Schema.Number)
+
+// Decode `null`, resulting in default union error messages
+Schema.decodeUnknownSync(MyUnion)(null)
+/*
+throws:
+ParseError: string | number
+├─ Expected string, actual null
+└─ Expected number, actual null
+*/
+
+// Define a union schema with a custom message and override flag
+const MyUnionWithMessage = Schema.Union(
+  Schema.String,
+  Schema.Number
+).annotations({
+  message: () => ({
+    message: "Please provide a string or a number",
+    // Ensures this message replaces all nested messages
+    override: true
+  })
+})
+
+// Decode with the custom schema, showing the new error message
+Schema.decodeUnknownSync(MyUnionWithMessage)(null)
+/*
+throws:
+ParseError: Please provide a string or a number
+*/
+```
+
+### General Guidelines for Messages
+
+The general logic followed to determine the messages is as follows:
+
+1. If no custom messages are set, the default message related to the innermost schema where the operation (i.e., decoding or encoding) failed is used.
+
+2. If custom messages are set, then the message corresponding to the **first** failed schema is used, starting from the innermost schema to the outermost. However, if the failing schema does not have a custom message, then **the default message is used**.
+
+3. As an opt-in feature, **you can override guideline 2** by setting the `override` flag to `true`. This allows the custom message to take precedence over all other custom messages from inner schemas. This is to address the scenario where a user wants to define a single cumulative custom message describing the properties that a valid value must have and does not want to see default messages.
+
+Let's see some practical examples.
+
+### Scalar Schemas
+
+**Example** (Simple Custom Message for Scalar Schema)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const MyString = Schema.String.annotations({
+  message: () => "my custom message"
+})
+
+const decode = Schema.decodeUnknownSync(MyString)
+
+try {
+  decode(null)
+} catch (e: any) {
+  console.log(e.message) // "my custom message"
+}
+```
+
+### Refinements
+
+This example demonstrates setting a custom message on the last refinement in a chain of refinements. As you can see, the custom message is only used if the refinement related to `maxLength` fails; otherwise, default messages are used.
+
+**Example** (Custom Message on Last Refinement in Chain)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const MyString = Schema.String.pipe(
+  Schema.minLength(1),
+  Schema.maxLength(2)
+).annotations({
+  // This message is displayed only if the last filter (`maxLength`) fails
+  message: () => "my custom message"
+})
+
+const decode = Schema.decodeUnknownSync(MyString)
+
+try {
+  decode(null)
+} catch (e: any) {
+  console.log(e.message)
+  /*
+   minLength(1) & maxLength(2)
+   └─ From side refinement failure
+      └─ minLength(1)
+         └─ From side refinement failure
+            └─ Expected string, actual null
+  */
+}
+
+try {
+  decode("")
+} catch (e: any) {
+  console.log(e.message)
+  /*
+   minLength(1) & maxLength(2)
+   └─ From side refinement failure
+      └─ minLength(1)
+         └─ Predicate refinement failure
+            └─ Expected a string at least 1 character(s) long, actual ""
+  */
+}
+
+try {
+  decode("abc")
+} catch (e: any) {
+  console.log(e.message)
+  // "my custom message"
+}
+```
+
+When setting multiple custom messages, the one corresponding to the **first** failed predicate is used, starting from the innermost refinement to the outermost:
+
+**Example** (Custom Messages for Multiple Refinements)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const MyString = Schema.String
+  // This message is displayed only if a non-String is passed as input
+  .annotations({ message: () => "String custom message" })
+  .pipe(
+    // This message is displayed only if the filter `minLength` fails
+    Schema.minLength(1, { message: () => "minLength custom message" }),
+    // This message is displayed only if the filter `maxLength` fails
+    Schema.maxLength(2, { message: () => "maxLength custom message" })
+  )
+
+const decode = Schema.decodeUnknownSync(MyString)
+
+try {
+  decode(null)
+} catch (e: any) {
+  console.log(e.message) // String custom message
+}
+
+try {
+  decode("")
+} catch (e: any) {
+  console.log(e.message) // minLength custom message
+}
+
+try {
+  decode("abc")
+} catch (e: any) {
+  console.log(e.message) // maxLength custom message
+}
+```
+
+You have the option to change the default behavior by setting the `override` flag to `true`. This is useful when you want to create a single comprehensive custom message that describes the required properties of a valid value without displaying default messages.
+
+**Example** (Overriding Default Messages)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const MyString = Schema.String.pipe(
+  Schema.minLength(1),
+  Schema.maxLength(2)
+).annotations({
+  // By setting the `override` flag to `true`, this message will always be shown for any error
+  message: () => ({ message: "my custom message", override: true })
+})
+
+const decode = Schema.decodeUnknownSync(MyString)
+
+try {
+  decode(null)
+} catch (e: any) {
+  console.log(e.message) // my custom message
+}
+
+try {
+  decode("")
+} catch (e: any) {
+  console.log(e.message) // my custom message
+}
+
+try {
+  decode("abc")
+} catch (e: any) {
+  console.log(e.message) // my custom message
+}
+```
+
+### Transformations
+
+In this example, `IntFromString` is a transformation schema that converts strings to integers. It applies specific validation messages based on different scenarios.
+
+**Example** (Custom Error Messages for String-to-Integer Transformation)
+
+```ts twoslash
+import { ParseResult, Schema } from "effect"
+
+const IntFromString = Schema.transformOrFail(
+  // This message is displayed only if the input is not a string
+  Schema.String.annotations({ message: () => "please enter a string" }),
+  // This message is displayed only if the input can be converted
+  // to a number but it's not an integer
+  Schema.Int.annotations({ message: () => "please enter an integer" }),
+  {
+    strict: true,
+    decode: (s, _, ast) => {
+      const n = Number(s)
+      return Number.isNaN(n)
+        ? ParseResult.fail(new ParseResult.Type(ast, s))
+        : ParseResult.succeed(n)
+    },
+    encode: (n) => ParseResult.succeed(String(n))
+  }
+)
+  // This message is displayed only if the input
+  // cannot be converted to a number
+  .annotations({ message: () => "please enter a parseable string" })
+
+const decode = Schema.decodeUnknownSync(IntFromString)
+
+try {
+  decode(null)
+} catch (e: any) {
+  console.log(e.message) // please enter a string
+}
+
+try {
+  decode("1.2")
+} catch (e: any) {
+  console.log(e.message) // please enter an integer
+}
+
+try {
+  decode("not a number")
+} catch (e: any) {
+  console.log(e.message) // please enter a parseable string
+}
+```
+
+### Compound Schemas
+
+The custom message system becomes especially handy when dealing with complex schemas, unlike simple scalar values like `string` or `number`. For instance, consider a schema comprising nested structures, such as a struct containing an array of other structs. Let's explore an example demonstrating the advantage of default messages in handling decoding errors within such nested structures:
+
+**Example** (Custom Error Messages in Nested Schemas)
+
+```ts twoslash
+import { Schema, pipe } from "effect"
+
+const schema = Schema.Struct({
+  outcomes: pipe(
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        text: pipe(
+          Schema.String.annotations({
+            message: () => "error_invalid_outcome_type"
+          }),
+          Schema.minLength(1, { message: () => "error_required_field" }),
+          Schema.maxLength(50, {
+            message: () => "error_max_length_field"
+          })
+        )
+      })
+    ),
+    Schema.minItems(1, { message: () => "error_min_length_field" })
+  )
+})
+
+Schema.decodeUnknownSync(schema, { errors: "all" })({
+  outcomes: []
+})
+/*
+throws
+ParseError: { readonly outcomes: minItems(1) }
+└─ ["outcomes"]
+   └─ error_min_length_field
+*/
+
+Schema.decodeUnknownSync(schema, { errors: "all" })({
+  outcomes: [
+    { id: "1", text: "" },
+    { id: "2", text: "this one is valid" },
+    { id: "3", text: "1234567890".repeat(6) }
+  ]
+})
+/*
+throws
+ParseError: { readonly outcomes: minItems(1) }
+└─ ["outcomes"]
+   └─ minItems(1)
+      └─ From side refinement failure
+         └─ ReadonlyArray<{ readonly id: string; readonly text: minLength(1) & maxLength(50) }>
+            ├─ [0]
+            │  └─ { readonly id: string; readonly text: minLength(1) & maxLength(50) }
+            │     └─ ["text"]
+            │        └─ error_required_field
+            └─ [2]
+               └─ { readonly id: string; readonly text: minLength(1) & maxLength(50) }
+                  └─ ["text"]
+                     └─ error_max_length_field
+*/
+```
+
+### Effectful messages
+
+Error messages can go beyond simple strings by returning an `Effect`, allowing them to access dependencies, such as an internationalization service. This approach lets messages dynamically adjust based on external context or services. Below is an example illustrating how to create effect-based messages.
+
+**Example** (Effect-Based Message with Internationalization Service)
+
+```ts twoslash
+import {
+  Context,
+  Effect,
+  Either,
+  Option,
+  Schema,
+  ParseResult
+} from "effect"
+
+// Define an internationalization service for custom messages
+class Messages extends Context.Tag("Messages")<
+  Messages,
+  {
+    NonEmpty: string
+  }
+>() {}
+
+// Define a schema with an effect-based message
+// that depends on the Messages service
+const Name = Schema.NonEmptyString.annotations({
+  message: () =>
+    Effect.gen(function* () {
+      // Attempt to retrieve the Messages service
+      const service = yield* Effect.serviceOption(Messages)
+      // Use a fallback message if the service is not available
+      return Option.match(service, {
+        onNone: () => "Invalid string",
+        onSome: (messages) => messages.NonEmpty
+      })
+    })
+})
+
+// Attempt to decode an empty string without providing the Messages service
+Schema.decodeUnknownEither(Name)("").pipe(
+  Either.mapLeft((error) =>
+    ParseResult.TreeFormatter.formatError(error).pipe(
+      Effect.runSync,
+      console.log
+    )
+  )
+)
+// Output: Invalid string
+
+// Provide the Messages service to customize the error message
+Schema.decodeUnknownEither(Name)("").pipe(
+  Either.mapLeft((error) =>
+    ParseResult.TreeFormatter.formatError(error).pipe(
+      Effect.provideService(Messages, {
+        NonEmpty: "should be non empty"
+      }),
+      Effect.runSync,
+      console.log
+    )
+  )
+)
+// Output: should be non empty
+```
+
+### Missing messages
+
+You can provide custom messages for missing fields or tuple elements using the `missingMessage` annotation.
+
+**Example** (Custom Message for Missing Property)
+
+In this example, a custom message is defined for a missing `name` property in the `Person` schema.
+
+```ts twoslash
+import { Schema } from "effect"
+
+const Person = Schema.Struct({
+  name: Schema.propertySignature(Schema.String).annotations({
+    // Custom message if "name" is missing
+    missingMessage: () => "Name is required"
+  })
+})
+
+Schema.decodeUnknownSync(Person)({})
+/*
+throws:
+ParseError: { readonly name: string }
+└─ ["name"]
+   └─ Name is required
+*/
+```
+
+**Example** (Custom Message for Missing Tuple Elements)
+
+Here, each element in the `Point` tuple schema has a specific custom message if the element is missing.
+
+```ts twoslash
+import { Schema } from "effect"
+
+const Point = Schema.Tuple(
+  Schema.element(Schema.Number).annotations({
+    // Message if X is missing
+    missingMessage: () => "X coordinate is required"
+  }),
+  Schema.element(Schema.Number).annotations({
+    // Message if Y is missing
+    missingMessage: () => "Y coordinate is required"
+  })
+)
+
+Schema.decodeUnknownSync(Point)([], { errors: "all" })
+/*
+throws:
+ParseError: readonly [number, number]
+├─ [0]
+│  └─ X coordinate is required
+└─ [1]
+   └─ Y coordinate is required
+*/
+```

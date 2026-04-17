@@ -1,0 +1,7 @@
+{
+  "name": "@zenbu/effect-context",
+  "version": "0.0.1",
+  "description": "Effect documentation and examples from effect.website",
+  "private": true,
+  "type": "module"
+}

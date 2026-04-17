@@ -1,0 +1,102 @@
+{
+  "id": "61091304-4a78-4469-93da-1011d4a66ce8",
+  "prevId": "d5868cbc-d99d-43bc-9efa-5fc540a42d9f",
+  "fields": {
+    "workspaces": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "8aa29350309b812d",
+      "default": []
+    },
+    "activeWorkspaceId": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": ""
+    },
+    "agentConfigs": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "e837f55d8f70e0e0",
+      "default": [
+        {
+          "id": "codex-acp",
+          "name": "Codex",
+          "startCommand": ""
+        }
+      ]
+    },
+    "agents": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "8bc340ed35971c32",
+      "default": []
+    },
+    "selectedConfigId": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": "codex-acp"
+    },
+    "sessions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "543a2197adc75660",
+      "default": {}
+    },
+    "configOptions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "656d48967911adc2",
+      "default": []
+    },
+    "orchestratorViewPath": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": "/views/orchestrator/index.html"
+    },
+    "sidebarOpen": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "7cb541e84f226754",
+      "default": false
+    },
+    "tabSidebarOpen": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "7cb541e84f226754",
+      "default": true
+    },
+    "sidebarPanel": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": "overview"
+    },
+    "viewRegistry": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "d38b50a8c731c28c",
+      "default": []
+    },
+    "commands": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "0fa6844b1a83162b",
+      "default": []
+    },
+    "majorMode": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": "fundamental-mode"
+    },
+    "minorModes": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "e2c7a0c35cb2fd9d",
+      "default": []
+    }
+  }
+}

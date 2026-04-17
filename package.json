@@ -1,0 +1,13 @@
+{
+  "name": "zenbu",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "pnpm --filter @zenbu/kernel start",
+    "typecheck": "pnpm -r run typecheck"
+  },
+  "dependencies": {
+    "@zenbu/advice": "workspace:*"
+  }
+}
+

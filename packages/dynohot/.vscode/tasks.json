@@ -1,0 +1,18 @@
+{
+	"version": "2.0.0",
+	"tasks": [ {
+		"label": "TypeScript",
+		"group": "build",
+		"command": "npx",
+		"args": [ "tsc", "--build", "--watch" ],
+		"problemMatcher": "$tsc-watch",
+		"isBackground": true,
+		"presentation": {
+			"panel": "dedicated",
+		},
+		"runOptions": {
+			"runOn": "folderOpen",
+		},
+		"icon": { "id": "zap" },
+	} ],
+}

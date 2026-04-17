@@ -1,0 +1,46 @@
+@import "tailwindcss";
+@import "../../styles/shadcn.css";
+@import "../../styles/chat.css";
+@source "../../../../node_modules/streamdown/dist";
+@source "../../../../node_modules/@streamdown/code/dist";
+
+@keyframes tab-sweep {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  40% {
+    opacity: 1;
+  }
+  50% {
+    transform: translateX(350%);
+    opacity: 0;
+  }
+  60% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #F4F4F4;
+}
+
+body.tab-dragging iframe {
+  pointer-events: none;
+}

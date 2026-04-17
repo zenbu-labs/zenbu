@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>CDP Viewport Demo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+      background: #0a0a0a;
+      color: #e0e0e0;
+      height: 100vh;
+      overflow: hidden;
+    }
+    .controls {
+      height: 140px;
+      padding: 14px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      border-bottom: 1px solid #222;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    h1 {
+      font-size: 13px;
+      font-weight: 600;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+    }
+    button {
+      padding: 6px 14px;
+      background: #1a1a2e;
+      color: #ccc;
+      border: 1px solid #2a2a4e;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: inherit;
+      white-space: nowrap;
+    }
+    button:hover { background: #252548; border-color: #4a4a8e; color: #fff; }
+    button:active { background: #0f3460; }
+    button.primary { background: #0f3460; border-color: #1a5490; color: #fff; }
+    button.primary:hover { background: #1a5490; }
+    button:disabled { opacity: 0.35; cursor: not-allowed; }
+    input[type="range"] {
+      flex: 1;
+      max-width: 280px;
+      accent-color: #4a90d9;
+    }
+    .status {
+      margin-left: auto;
+      font-size: 11px;
+      color: #555;
+      font-family: 'SF Mono', Menlo, monospace;
+    }
+    .status.loaded { color: #4ade80; }
+    .stat {
+      font-family: 'SF Mono', Menlo, monospace;
+      font-size: 11px;
+      color: #666;
+    }
+    .stat .v { color: #4a90d9; }
+    .sep { color: #333; margin: 0 2px; }
+    label {
+      font-size: 12px;
+      color: #666;
+      min-width: 38px;
+    }
+    .result {
+      font-family: 'SF Mono', Menlo, monospace;
+      font-size: 11px;
+      color: #4ade80;
+    }
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <div class="row">
+      <h1>CDP Viewport Demo</h1>
+      <div class="status" id="status">No page loaded</div>
+    </div>
+    <div class="row">
+      <button class="primary" id="btnWiki">Load Wikipedia</button>
+      <button id="btnTest">Load Test Page</button>
+      <span class="sep">|</span>
+      <span class="stat">Viewport: <span class="v" id="vpDisplay">&mdash;</span></span>
+    </div>
+    <div class="row">
+      <label>Width</label>
+      <input type="range" id="slider" min="200" max="1400" value="1200" disabled>
+      <span class="stat"><span class="v" id="wLabel">1200</span>px</span>
+      <span class="sep">|</span>
+      <button id="btnShrink" disabled>&rarr; 400px</button>
+      <button id="btnGrow" disabled>&rarr; 1200px</button>
+      <button id="btnReset" disabled>Reset</button>
+    </div>
+    <div class="row">
+      <span class="stat">FPS: <span class="v" id="fpsEl">&mdash;</span></span>
+      <span class="sep">|</span>
+      <span class="result" id="resultEl"></span>
+    </div>
+  </div>
+
+  <script>
+    const ipc = window.api
+
+    const $ = (id) => document.getElementById(id)
+    const slider   = $('slider')
+    const wLabel   = $('wLabel')
+    const vpDisplay = $('vpDisplay')
+    const fpsEl    = $('fpsEl')
+    const resultEl = $('resultEl')
+    const statusEl = $('status')
+    const btnShrink = $('btnShrink')
+    const btnGrow   = $('btnGrow')
+    const btnReset  = $('btnReset')
+
+    let vpWidth = 0, vpHeight = 0, animating = false
+
+    function setStatus(t, ok) {
+      statusEl.textContent = t
+      statusEl.className = 'status' + (ok ? ' loaded' : '')
+    }
+
+    function setControls(on) {
+      slider.disabled = !on
+      btnShrink.disabled = !on
+      btnGrow.disabled = !on
+      btnReset.disabled = !on
+    }
+
+    async function loadSite(fn, label) {
+      setStatus('Loading...')
+      setControls(false)
+      try {
+        console.log('[orchestrator] loading', label)
+        const s = await fn()
+        console.log('[orchestrator] loaded, size:', s)
+        vpWidth = s.width; vpHeight = s.height
+        slider.value = s.width; slider.max = s.width
+        wLabel.textContent = s.width
+        vpDisplay.textContent = s.width + ' x ' + s.height
+        setStatus(label + ' loaded', true)
+        setControls(true)
+      } catch (e) {
+        console.error('[orchestrator] load failed:', e)
+        setStatus('Error: ' + e.message)
+      }
+    }
+
+    $('btnWiki').addEventListener('click', () => {
+      loadSite(
+        () => ipc.loadWebsite('https://en.wikipedia.org/wiki/Electron_(software)'),
+        'Wikipedia'
+      )
+    })
+
+    $('btnTest').addEventListener('click', () => {
+      loadSite(() => ipc.loadTestPage(), 'Test page')
+    })
+
+    slider.addEventListener('input', () => {
+      const w = parseInt(slider.value)
+      wLabel.textContent = w
+      vpWidth = w
+      vpDisplay.textContent = w + ' x ' + vpHeight
+      ipc.setViewport(w, vpHeight)
+    })
+
+    btnShrink.addEventListener('click', () => animateTo(400))
+    btnGrow.addEventListener('click', () => animateTo(1200))
+    btnReset.addEventListener('click', doReset)
+
+    async function animateTo(target) {
+      if (animating) return
+      animating = true
+      setControls(false)
+      resultEl.textContent = 'Animating...'
+
+      const from = vpWidth || parseInt(slider.max)
+      const r = await ipc.animateViewport(from, target, 1000)
+
+      vpWidth = target
+      slider.value = target
+      wLabel.textContent = target
+      animating = false
+      setControls(true)
+
+      if (r) {
+        resultEl.textContent =
+          r.frames + ' frames / ' + r.durationMs + 'ms (' + r.avgFps + ' fps avg)'
+      }
+    }
+
+    async function doReset() {
+      await ipc.resetViewport()
+      const s = await ipc.getContentSize()
+      if (s) {
+        vpWidth = s.width; vpHeight = s.height
+        slider.value = s.width; wLabel.textContent = s.width
+        vpDisplay.textContent = s.width + ' x ' + s.height
+      }
+      resultEl.textContent = 'Viewport reset'
+    }
+
+    ipc.onViewportUpdate((d) => {
+      vpDisplay.textContent = d.width + ' x ' + d.height
+      fpsEl.textContent = Math.round(d.fps)
+      slider.value = d.width
+      wLabel.textContent = d.width
+      vpWidth = d.width
+    })
+
+    ipc.onContentResized((s) => {
+      slider.max = s.width
+      vpHeight = s.height
+    })
+
+    console.log('[orchestrator] ready, ipc:', ipc)
+    loadSite(() => ipc.loadTestPage(), 'Test page')
+  </script>
+</body>
+</html>

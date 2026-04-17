@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Layout Test</title>
+  <style>
+    * { margin: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, system-ui, sans-serif;
+      background: #f4f4f5;
+      min-height: 100vh;
+    }
+    .header {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 56px;
+      background: #18181b;
+      color: white;
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      z-index: 100;
+      font-weight: 600;
+    }
+    .badge {
+      position: fixed;
+      top: 66px; right: 16px;
+      background: #18181b;
+      color: #4ade80;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-family: 'SF Mono', Menlo, monospace;
+      font-size: 13px;
+      z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    .content { padding: 76px 24px 24px; }
+    .vw-bar {
+      width: 50vw;
+      height: 48px;
+      background: linear-gradient(135deg, #6366f1, #a855f7);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 20px;
+    }
+    .flex-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .flex-row .box {
+      flex: 1;
+      height: 60px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 600;
+      font-size: 13px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .card h3 { font-size: 15px; margin-bottom: 6px; color: #18181b; }
+    .card p { font-size: 13px; color: #71717a; line-height: 1.5; }
+    .sidebar {
+      position: fixed;
+      right: 0; top: 56px; bottom: 0;
+      width: 220px;
+      background: #e4e4e7;
+      padding: 20px;
+      border-left: 1px solid #d4d4d8;
+    }
+    .sidebar h3 { font-size: 13px; color: #52525b; margin-bottom: 8px; }
+    .sidebar p { font-size: 12px; color: #71717a; line-height: 1.5; }
+
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .header { font-size: 14px; }
+    }
+    @media (max-width: 500px) {
+      .grid { grid-template-columns: 1fr; }
+      .content { padding: 76px 12px 12px; }
+      .card { padding: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">CDP Viewport Layout Test</div>
+  <div class="badge" id="badge">…</div>
+  <div class="content">
+    <div class="vw-bar" id="vwBar">50vw wide</div>
+    <div class="flex-row">
+      <div class="box" style="background:#ef4444">flex:1</div>
+      <div class="box" style="background:#f97316">flex:1</div>
+      <div class="box" style="background:#eab308">flex:1</div>
+      <div class="box" style="background:#22c55e">flex:1</div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3>Auto-fill Grid</h3>
+        <p>minmax(220px, 1fr) — columns change as viewport narrows.</p>
+      </div>
+      <div class="card">
+        <h3>Media Queries</h3>
+        <p>Sidebar hides below 768px. Grid collapses to 1-col below 500px.</p>
+      </div>
+      <div class="card">
+        <h3>Fixed Position</h3>
+        <p>Header and sidebar use position:fixed and reanchor to the emulated viewport.</p>
+      </div>
+      <div class="card">
+        <h3>VW Units</h3>
+        <p>The purple bar is 50vw — it tracks the emulated viewport width.</p>
+      </div>
+      <div class="card">
+        <h3>Flexbox</h3>
+        <p>The colored boxes are flex:1 in a row. They compress evenly.</p>
+      </div>
+      <div class="card">
+        <h3>Absolute Position</h3>
+        <p>Sidebar is position:fixed at right:0, follows viewport edge.</p>
+      </div>
+    </div>
+  </div>
+  <div class="sidebar">
+    <h3>Sidebar (fixed)</h3>
+    <p>Right-anchored. Hides below 768px via media query.</p>
+    <p style="margin-top:12px">Verifies CSS layout fully responds to CDP viewport override.</p>
+  </div>
+  <script>
+    const badge = document.getElementById('badge')
+    const vwBar = document.getElementById('vwBar')
+    function update() {
+      badge.textContent = window.innerWidth + ' × ' + window.innerHeight
+      vwBar.textContent = '50vw = ' + Math.round(window.innerWidth / 2) + 'px'
+    }
+    update()
+    window.addEventListener('resize', update)
+    new ResizeObserver(update).observe(document.documentElement)
+  </script>
+</body>
+</html>

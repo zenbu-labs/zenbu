@@ -1,0 +1,268 @@
+---
+title: Introduction to Effect Platform
+description: Build cross-platform applications with unified abstractions for Node.js, Deno, Bun, and browsers using @effect/platform.
+sidebar:
+  label: Introduction
+  order: 0
+---
+
+import {
+  Aside,
+  Tabs,
+  TabItem,
+  Badge
+} from "@astrojs/starlight/components"
+
+`@effect/platform` is a library for building platform-independent abstractions in environments such as Node.js, Deno, Bun, and browsers.
+
+With `@effect/platform`, you can integrate abstract services like [FileSystem](/docs/platform/file-system/) or [Terminal](/docs/platform/terminal/) into your program.
+When assembling your final application, you can provide specific [layers](/docs/requirements-management/layers/) for the target platform using the corresponding packages:
+
+- `@effect/platform-node` for Node.js or Deno
+- `@effect/platform-bun` for Bun
+- `@effect/platform-browser` for browsers
+
+### Stable Modules
+
+The following modules are stable and their documentation is available on this website:
+
+| Module                                           | Description                                                | Status                                    |
+| ------------------------------------------------ | ---------------------------------------------------------- | ----------------------------------------- |
+| [Command](/docs/platform/command/)               | Provides a way to interact with the command line.          | <Badge text="Stable" variant="success" /> |
+| [FileSystem](/docs/platform/file-system/)        | A module for file system operations.                       | <Badge text="Stable" variant="success" /> |
+| [KeyValueStore](/docs/platform/key-value-store/) | Manages key-value pairs for data storage.                  | <Badge text="Stable" variant="success" /> |
+| [Path](/docs/platform/path/)                     | Utilities for working with file paths.                     | <Badge text="Stable" variant="success" /> |
+| [PlatformLogger](/docs/platform/platformlogger/) | Log messages to a file using the FileSystem APIs.          | <Badge text="Stable" variant="success" /> |
+| [Runtime](/docs/platform/runtime/)               | Run your program with built-in error handling and logging. | <Badge text="Stable" variant="success" /> |
+| [Terminal](/docs/platform/terminal/)             | Tools for terminal interaction.                            | <Badge text="Stable" variant="success" /> |
+
+### Unstable Modules
+
+Some modules in `@effect/platform` are still in development or marked as experimental.
+These features are subject to change.
+
+| Module                                                                                               | Description                                     | Status                                      |
+| ---------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------- |
+| [Http API](https://github.com/Effect-TS/effect/blob/main/packages/platform/README.md#http-api)       | Provide a declarative way to define HTTP APIs.  | <Badge text="Unstable" variant="caution" /> |
+| [Http Client](https://github.com/Effect-TS/effect/blob/main/packages/platform/README.md#http-client) | A client for making HTTP requests.              | <Badge text="Unstable" variant="caution" /> |
+| [Http Server](https://github.com/Effect-TS/effect/blob/main/packages/platform/README.md#http-server) | A server for handling HTTP requests.            | <Badge text="Unstable" variant="caution" /> |
+| [Socket](https://effect-ts.github.io/effect/platform/Socket.ts.html)                                 | A module for socket-based communication.        | <Badge text="Unstable" variant="caution" /> |
+| [Worker](https://effect-ts.github.io/effect/platform/Worker.ts.html)                                 | A module for running tasks in separate workers. | <Badge text="Unstable" variant="caution" /> |
+
+For the most up-to-date documentation and details, please refer to the official [README](https://github.com/Effect-TS/effect/blob/main/packages/platform/README.md) of the package.
+
+## Installation
+
+To install the **beta** version:
+
+<Tabs syncKey="package-manager">
+
+<TabItem label="npm" icon="seti:npm">
+
+```sh showLineNumbers=false
+npm install @effect/platform
+```
+
+</TabItem>
+
+<TabItem label="pnpm" icon="pnpm">
+
+```sh showLineNumbers=false
+pnpm add @effect/platform
+```
+
+</TabItem>
+
+<TabItem label="Yarn" icon="yarn">
+
+```sh showLineNumbers=false
+yarn add @effect/platform
+```
+
+</TabItem>
+
+<TabItem label="Bun" icon="bun">
+
+```sh showLineNumbers=false
+bun add @effect/platform
+```
+
+</TabItem>
+
+<TabItem label="Deno" icon="deno">
+
+```sh showLineNumbers=false
+deno add npm:@effect/platform
+```
+
+</TabItem>
+
+</Tabs>
+
+## Getting Started with Cross-Platform Programming
+
+Here's a basic example using the `Path` module to create a file path, which can run across different environments:
+
+**Example** (Cross-Platform Path Handling)
+
+```ts twoslash title="index.ts"
+import { Path } from "@effect/platform"
+import { Effect } from "effect"
+
+const program = Effect.gen(function* () {
+  // Access the Path service
+  const path = yield* Path.Path
+
+  // Join parts of a path to create a complete file path
+  const mypath = path.join("tmp", "file.txt")
+
+  console.log(mypath)
+})
+```
+
+### Running the Program in Node.js or Deno
+
+First, install the Node.js-specific package:
+
+<Tabs syncKey="package-manager">
+
+<TabItem label="npm" icon="seti:npm">
+
+```sh showLineNumbers=false
+npm install @effect/platform-node
+```
+
+</TabItem>
+
+<TabItem label="pnpm" icon="pnpm">
+
+```sh showLineNumbers=false
+pnpm add @effect/platform-node
+```
+
+</TabItem>
+
+<TabItem label="Yarn" icon="yarn">
+
+```sh showLineNumbers=false
+yarn add @effect/platform-node
+```
+
+</TabItem>
+
+<TabItem label="Deno" icon="deno">
+
+```sh showLineNumbers=false
+deno add npm:@effect/platform-node
+```
+
+</TabItem>
+
+</Tabs>
+
+Update the program to load the Node.js-specific context:
+
+**Example** (Providing Node.js Context)
+
+```ts twoslash title="index.ts" ins={3,15}
+import { Path } from "@effect/platform"
+import { Effect } from "effect"
+import { NodeContext, NodeRuntime } from "@effect/platform-node"
+
+const program = Effect.gen(function* () {
+  // Access the Path service
+  const path = yield* Path.Path
+
+  // Join parts of a path to create a complete file path
+  const mypath = path.join("tmp", "file.txt")
+
+  console.log(mypath)
+})
+
+NodeRuntime.runMain(program.pipe(Effect.provide(NodeContext.layer)))
+```
+
+Finally, run the program in Node.js using `tsx`, or directly in Deno:
+
+<Tabs syncKey="package-manager">
+
+<TabItem label="npm" icon="seti:npm">
+
+```sh showLineNumbers=false
+npx tsx index.ts
+# Output: tmp/file.txt
+```
+
+</TabItem>
+
+<TabItem label="pnpm" icon="pnpm">
+
+```sh showLineNumbers=false
+pnpm dlx tsx index.ts
+# Output: tmp/file.txt
+```
+
+</TabItem>
+
+<TabItem label="Yarn" icon="seti:yarn">
+
+```sh showLineNumbers=false
+yarn dlx tsx index.ts
+# Output: tmp/file.txt
+```
+
+</TabItem>
+
+<TabItem label="Deno" icon="deno">
+
+```sh showLineNumbers=false
+deno run index.ts
+# Output: tmp/file.txt
+
+# or
+
+deno run -RE index.ts
+# Output: tmp/file.txt
+# (granting required Read and Environment permissions without being prompted)
+```
+
+</TabItem>
+
+</Tabs>
+
+### Running the Program in Bun
+
+To run the same program in Bun, first install the Bun-specific package:
+
+```sh showLineNumbers=false
+bun add @effect/platform-bun
+```
+
+Update the program to use the Bun-specific context:
+
+**Example** (Providing Bun Context)
+
+```ts twoslash title="index.ts" ins={3,15}
+import { Path } from "@effect/platform"
+import { Effect } from "effect"
+import { BunContext, BunRuntime } from "@effect/platform-bun"
+
+const program = Effect.gen(function* () {
+  // Access the Path service
+  const path = yield* Path.Path
+
+  // Join parts of a path to create a complete file path
+  const mypath = path.join("tmp", "file.txt")
+
+  console.log(mypath)
+})
+
+BunRuntime.runMain(program.pipe(Effect.provide(BunContext.layer)))
+```
+
+Run the program in Bun:
+
+```sh showLineNumbers=false
+bun index.ts
+tmp/file.txt
+```

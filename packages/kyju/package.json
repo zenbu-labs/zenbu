@@ -1,0 +1,48 @@
+{
+  "name": "@zenbu/kyju",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "kyju": "./dist/bin.cjs"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.typetest.json",
+    "build": "tsx build.ts"
+  },
+  "main": "src/v2/index.ts",
+  "exports": {
+    ".": "./src/v2/index.ts",
+    "./effect": "./src/v2/effect.ts",
+    "./react": "./src/v2/react/index.ts",
+    "./schema": "./src/v2/db/schema.ts",
+    "./migrations": "./src/v2/migrations.ts",
+    "./config": "./src/cli/config.ts",
+    "./transport": "./src/v2/transport.ts"
+  },
+  "dependencies": {
+    "@effect/cli": "^0.73.2",
+    "@effect/platform": "^0.94.5",
+    "@effect/platform-node": "^0.104.1",
+    "@types/node": "^25.5.0",
+    "effect": "catalog:",
+    "nanoid": "^5.1.6",
+    "zod": "^4.3.6"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.2.3",
+    "esbuild": "^0.25.12",
+    "jsdom": "^26.1.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "tsx": "^4.21.0",
+    "type-testing": "^0.2.0",
+    "vitest": "^3.2.4"
+  }
+}

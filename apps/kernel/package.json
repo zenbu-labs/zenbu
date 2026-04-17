@@ -1,0 +1,80 @@
+{
+  "name": "@zenbu/kernel",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "start": "dist/mac-arm64/Zenbu.app/Contents/MacOS/Zenbu",
+    "build": "node scripts/build.mjs",
+    "dist": "pnpm build && electron-builder --mac --config.mac.identity=null",
+    "dist:mac": "pnpm build && electron-builder --mac",
+    "dist:win": "pnpm build && electron-builder --win",
+    "dist:linux": "pnpm build && electron-builder --linux",
+    "release": "bash scripts/release-local.sh"
+  },
+  "build": {
+    "appId": "com.zenbu.desktop",
+    "productName": "Zenbu",
+    "directories": {
+      "buildResources": "electron-builder-resources"
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] },
+        { "target": "zip", "arch": ["x64", "arm64"] }
+      ],
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "electron-builder-resources/entitlements.mac.plist",
+      "entitlementsInherit": "electron-builder-resources/entitlements.mac.plist"
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+    "linux": {
+      "target": [
+        { "target": "AppImage", "arch": ["x64"] }
+      ],
+      "category": "Development"
+    },
+    "files": [
+      "dist/main/**",
+      "src/setup/**",
+      "src/shell/*-hooks.js"
+    ],
+    "extraMetadata": {
+      "main": "dist/main/index.js"
+    },
+    "asar": false,
+    "publish": {
+      "provider": "github",
+      "owner": "RobPruzan",
+      "repo": "zenbu"
+    }
+  },
+  "dependencies": {
+    "@zenbu/advice": "workspace:*",
+    "dynohot": "workspace:*",
+    "esbuild": "^0.25.0",
+    "@esbuild/darwin-arm64": "^0.25.0",
+    "nanoid": "^5.1.6",
+    "tsx": "^4.21.0",
+    "vite": "^6.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "@tailwindcss/vite": "^4",
+    "tailwindcss": "^4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.0",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.0"
+  }
+}

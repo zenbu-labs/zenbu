@@ -1,0 +1,9 @@
+packages:
+  - 'packages/*'
+  - 'packages/virtualizer/example'
+  - 'apps/*'
+  - 'docs/*'
+  - 'explorations/*'
+
+catalog:
+  effect: "3.20.0"

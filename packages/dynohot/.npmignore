@@ -1,0 +1,6 @@
+*
+!hot.ts
+!README.md
+!**/*.d.ts
+!dist/**/*.js
+dist/__tests__

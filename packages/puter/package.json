@@ -1,0 +1,20 @@
+{
+  "name": "@zenbu/puter",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "puter": "./src/bin.ts"
+  },
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.0.0",
+    "vitest": "^3.2.4",
+    "zod": "^4.3.6"
+  }
+}

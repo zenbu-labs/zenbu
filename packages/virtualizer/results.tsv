@@ -1,0 +1,2 @@
+experiment	commit	status	peak_long_task_ms	max_react_passes	max_renders	max_layouts	fuzz_pass	description
+0	baseline	baseline	30.0	5	52	6	5/5	Initial state before optimization

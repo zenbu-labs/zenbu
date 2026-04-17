@@ -1,0 +1,313 @@
+---
+title: Introduction to Runtime
+description: Learn how Effect's runtime system executes concurrent programs, manages resources, and handles configuration with flexibility and efficiency.
+sidebar:
+  label: Runtime
+  order: 6
+---
+
+The `Runtime<R>` data type represents a runtime system that can **execute effects**. To run an effect, `Effect<A, E, R>`, we need a `Runtime<R>` that contains the required resources, denoted by the `R` type parameter.
+
+A `Runtime<R>` consists of three main components:
+
+- A value of type `Context<R>`
+- A value of type `FiberRefs`
+- A value of type `RuntimeFlags`
+
+## What is a Runtime System?
+
+When we write an Effect program, we construct an `Effect` using constructors and combinators.
+Essentially, we are creating a blueprint of a program.
+An `Effect` is merely a data structure that describes the execution of a concurrent program.
+It represents a tree-like structure that combines various primitives to define what the effect should do.
+
+However, this data structure itself does not perform any actions, it is solely a description of a concurrent program.
+
+To execute this program, the Effect runtime system comes into play. The `Runtime.run*` functions (e.g., `Runtime.runPromise`, `Runtime.runFork`) are responsible for taking this blueprint and executing it.
+
+When the runtime system runs an effect, it creates a root fiber, initializing it with:
+
+- The initial [context](/docs/requirements-management/services/#how-it-works)
+- The initial `FiberRefs`
+- The initial effect
+
+It then starts a loop, executing the instructions described by the `Effect` step by step.
+
+You can think of the runtime as a system that takes an [`Effect<A, E, R>`](/docs/getting-started/the-effect-type/) and its associated context `Context<R>` and produces an [`Exit<A, E>`](/docs/data-types/exit/) result.
+
+```text showLineNumbers=false
+┌────────────────────────────────┐
+│  Context<R> + Effect<A, E, R>  │
+└────────────────────────────────┘
+               │
+               ▼
+┌────────────────────────────────┐
+│      Effect Runtime System     │
+└────────────────────────────────┘
+               │
+               ▼
+┌────────────────────────────────┐
+│          Exit<A, E>            │
+└────────────────────────────────┘
+```
+
+Runtime Systems have a lot of responsibilities:
+
+| Responsibility                | Description                                                                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| **Executing the program**     | The runtime must execute every step of the effect in a loop until the program completes.                           |
+| **Handling errors**           | It handles both expected and unexpected errors that occur during execution.                                        |
+| **Managing concurrency**      | The runtime spawns new fibers when `Effect.fork` is called to handle concurrent operations.                        |
+| **Cooperative yielding**      | It ensures fibers don't monopolize resources, yielding control when necessary.                                     |
+| **Ensuring resource cleanup** | The runtime guarantees finalizers run properly to clean up resources when needed.                                  |
+| **Handling async callbacks**  | The runtime deals with asynchronous operations transparently, allowing you to write async and sync code uniformly. |
+
+## The Default Runtime
+
+When we use [functions that run effects](/docs/getting-started/running-effects/) like `Effect.runPromise` or `Effect.runFork`, we are actually using the **default runtime** without explicitly mentioning it. These functions are designed as convenient shortcuts for executing our effects using the default runtime.
+
+Each of the `Effect.run*` functions internally calls the corresponding `Runtime.run*` function, passing in the default runtime. For example, `Effect.runPromise` is just an alias for `Runtime.runPromise(defaultRuntime)`.
+
+Both of the following executions are functionally equivalent:
+
+**Example** (Running an Effect Using the Default Runtime)
+
+```ts twoslash
+import { Effect, Runtime } from "effect"
+
+const program = Effect.log("Application started!")
+
+Effect.runPromise(program)
+/*
+Output:
+timestamp=... level=INFO fiber=#0 message="Application started!"
+*/
+
+Runtime.runPromise(Runtime.defaultRuntime)(program)
+/*
+Output:
+timestamp=... level=INFO fiber=#0 message="Application started!"
+*/
+```
+
+In both cases, the program runs using the default runtime, producing the same output.
+
+The default runtime includes:
+
+- An empty [context](/docs/requirements-management/services/#how-it-works)
+- A set of `FiberRefs` that include the [default services](/docs/requirements-management/default-services/)
+- A default configuration for `RuntimeFlags` that enables `Interruption` and `CooperativeYielding`
+
+In most scenarios, using the default runtime is sufficient for effect execution.
+However, there are cases where it's helpful to create a custom runtime, particularly when you need to reuse specific configurations or contexts.
+
+For example, in a React app or when executing operations on a server in response to API requests, you might create a `Runtime<R>` by initializing a [layer](/docs/requirements-management/layers/) `Layer<R, Err, RIn>`. This allows you to maintain a consistent context across different execution boundaries.
+
+## Locally Scoped Runtime Configuration
+
+In Effect, runtime configurations are typically **inherited** from their parent workflows.
+This means that when we access a runtime configuration or obtain a runtime inside a workflow, we are essentially using the configuration of the parent workflow.
+
+However, there are cases where we want to temporarily **override the runtime configuration for a specific part** of our code.
+This concept is known as locally scoped runtime configuration.
+Once the execution of that code region is completed, the runtime configuration **reverts** to its original settings.
+
+To achieve this, we make use of the `Effect.provide` function, which allow us to provide a new runtime configuration to a specific section of our code.
+
+**Example** (Overriding the Logger Configuration)
+
+In this example, we create a simple logger using `Logger.replace`, which replaces the default logger with a custom one that logs messages without timestamps or levels. We then use `Effect.provide` to apply this custom logger to the program.
+
+```ts twoslash
+import { Logger, Effect } from "effect"
+
+const addSimpleLogger = Logger.replace(
+  Logger.defaultLogger,
+  // Custom logger implementation
+  Logger.make(({ message }) => console.log(message))
+)
+
+const program = Effect.gen(function* () {
+  yield* Effect.log("Application started!")
+  yield* Effect.log("Application is about to exit!")
+})
+
+// Running with the default logger
+Effect.runFork(program)
+/*
+Output:
+timestamp=... level=INFO fiber=#0 message="Application started!"
+timestamp=... level=INFO fiber=#0 message="Application is about to exit!"
+*/
+
+// Overriding the default logger with a custom one
+Effect.runFork(program.pipe(Effect.provide(addSimpleLogger)))
+/*
+Output:
+[ 'Application started!' ]
+[ 'Application is about to exit!' ]
+*/
+```
+
+To ensure that the runtime configuration is only applied to a specific part of an Effect application, we should provide the configuration layer exclusively to that particular section.
+
+**Example** (Providing a configuration layer to a nested workflow)
+
+In this example, we demonstrate how to apply a custom logger configuration only to a specific section of the program. The default logger is used for most of the program, but when we apply the `Effect.provide(addSimpleLogger)` call, it overrides the logger within that specific nested block. After that, the configuration reverts to its original state.
+
+```ts twoslash
+import { Logger, Effect } from "effect"
+
+const addSimpleLogger = Logger.replace(
+  Logger.defaultLogger,
+  // Custom logger implementation
+  Logger.make(({ message }) => console.log(message))
+)
+
+const removeDefaultLogger = Logger.remove(Logger.defaultLogger)
+
+const program = Effect.gen(function* () {
+  // Logs with default logger
+  yield* Effect.log("Application started!")
+
+  yield* Effect.gen(function* () {
+    // This log is suppressed
+    yield* Effect.log("I'm not going to be logged!")
+
+    // Custom logger applied here
+    yield* Effect.log("I will be logged by the simple logger.").pipe(
+      Effect.provide(addSimpleLogger)
+    )
+
+    // This log is suppressed
+    yield* Effect.log(
+      "Reset back to the previous configuration, so I won't be logged."
+    )
+  }).pipe(
+    // Remove the default logger temporarily
+    Effect.provide(removeDefaultLogger)
+  )
+
+  // Logs with default logger again
+  yield* Effect.log("Application is about to exit!")
+})
+
+Effect.runSync(program)
+/*
+Output:
+timestamp=... level=INFO fiber=#0 message="Application started!"
+[ 'I will be logged by the simple logger.' ]
+timestamp=... level=INFO fiber=#0 message="Application is about to exit!"
+*/
+```
+
+## ManagedRuntime
+
+When developing an Effect application and using `Effect.run*` functions to execute it, the application is automatically run using the default runtime behind the scenes. While it’s possible to adjust specific parts of the application by providing locally scoped configuration layers using `Effect.provide`, there are scenarios where you might want to **customize the runtime configuration for the entire application** from the top level.
+
+In these cases, you can create a top-level runtime by converting a configuration layer into a runtime using the `ManagedRuntime.make` constructor.
+
+**Example** (Creating and Using a Custom Managed Runtime)
+
+In this example, we first create a custom configuration layer called `appLayer`, which replaces the default logger with a simple one that logs messages to the console. Next, we use `ManagedRuntime.make` to turn this configuration layer into a runtime.
+
+```ts twoslash
+import { Effect, ManagedRuntime, Logger } from "effect"
+
+// Define a configuration layer that replaces the default logger
+const appLayer = Logger.replace(
+  Logger.defaultLogger,
+  // Custom logger implementation
+  Logger.make(({ message }) => console.log(message))
+)
+
+// Create a custom runtime from the configuration layer
+const runtime = ManagedRuntime.make(appLayer)
+
+const program = Effect.log("Application started!")
+
+// Execute the program using the custom runtime
+runtime.runSync(program)
+
+// Clean up resources associated with the custom runtime
+Effect.runFork(runtime.disposeEffect)
+/*
+Output:
+[ 'Application started!' ]
+*/
+```
+
+### Effect.Tag
+
+When working with runtimes that you pass around, `Effect.Tag` can help simplify the access to services. It lets you define a new tag and embed the service shape directly into the static properties of the tag class.
+
+**Example** (Defining a Tag for Notifications)
+
+```ts twoslash
+import { Effect } from "effect"
+
+class Notifications extends Effect.Tag("Notifications")<
+  Notifications,
+  { readonly notify: (message: string) => Effect.Effect<void> }
+>() {}
+```
+
+In this setup, the fields of the service (in this case, the `notify` method) are turned into static properties of the `Notifications` class, making it easier to access them.
+
+This allows you to interact with the service directly:
+
+**Example** (Using the Notifications Tag)
+
+```ts twoslash
+import { Effect } from "effect"
+
+class Notifications extends Effect.Tag("Notifications")<
+  Notifications,
+  { readonly notify: (message: string) => Effect.Effect<void> }
+>() {}
+
+// Create an effect that depends on the Notifications service
+//
+//      ┌─── Effect<void, never, Notifications>
+//      ▼
+const action = Notifications.notify("Hello, world!")
+```
+
+In this example, the `action` effect depends on the `Notifications` service. This approach allows you to reference services without manually passing them around. Later, you can create a `Layer` that provides the `Notifications` service and build a `ManagedRuntime` with that layer to ensure the service is available where needed.
+
+### Integrations
+
+The `ManagedRuntime` simplifies the integration of services and layers with other frameworks or tools, particularly in environments where Effect is not the primary framework and access to the main entry point is restricted.
+
+For example, in environments like React or other frameworks where you have limited control over the main application entry point, `ManagedRuntime` helps manage the lifecycle of services.
+
+Here's how to manage a service's lifecycle within an external framework:
+
+**Example** (Using `ManagedRuntime` in an External Framework)
+
+```ts twoslash
+import { Effect, ManagedRuntime, Layer, Console } from "effect"
+
+// Define the Notifications service using Effect.Tag
+class Notifications extends Effect.Tag("Notifications")<
+  Notifications,
+  { readonly notify: (message: string) => Effect.Effect<void> }
+>() {
+  // Provide a live implementation of the Notifications service
+  static Live = Layer.succeed(this, {
+    notify: (message) => Console.log(message)
+  })
+}
+
+// Example entry point for an external framework
+async function main() {
+  // Create a custom runtime using the Notifications layer
+  const runtime = ManagedRuntime.make(Notifications.Live)
+
+  // Run the effect
+  await runtime.runPromise(Notifications.notify("Hello, world!"))
+
+  // Dispose of the runtime, cleaning up resources
+  await runtime.dispose()
+}
+```

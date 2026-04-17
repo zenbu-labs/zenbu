@@ -1,0 +1,160 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+.pnp.cjs
+.pnpm-store/
+.yarn/
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+# Build output
+dist/
+dist-electron/
+out/
+build/
+*.tsbuildinfo
+**/.next/
+.next/
+.nuxt/
+.output/
+.vercel/
+.netlify/
+.serverless/
+.amplify/
+.firebase/
+storybook-static/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+.fleet/
+*.sublime-workspace
+*.sublime-project
+.project
+.classpath
+.settings/
+*.code-workspace
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Env files
+.env
+.env.*
+!.env.example
+!.env.template
+!.env.sample
+!.env.*.example
+**/.data
+
+# Testing
+coverage/
+.nyc_output/
+*.lcov
+.jest/
+jest-results/
+test-results/
+playwright-report/
+playwright/.cache/
+cypress/videos/
+cypress/screenshots/
+
+# Cache
+.cache/
+.parcel-cache/
+.turbo/
+.vite/
+*.tgz
+.eslintcache
+.stylelintcache
+.prettiercache
+*.cache
+.npm/
+.pnpm-debug.log
+
+# Python (if applicable)
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+.eggs/
+*.egg-info/
+venv/
+.venv/
+ENV/
+env/
+
+# Rust (if applicable)
+target/
+Cargo.lock
+*.rlib
+
+# Misc
+*.pem
+*.local
+*.bak
+*.backup
+*.tmp
+*.temp
+*.orig
+.history/
+.fuse_hidden*
+.Trash-*
+*.stackdump
+
+# Docker
+*.pid
+*.seed
+*.pid.lock
+
+# Secrets (extra protection)
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+.secrets/
+
+# Generated files
+*.generated.*
+generated/
+.generated/
+
+# Machine-specific tsconfig with local paths
+tsconfig.local.json
+
+# Explorations — throwaway sandboxes, not tracked
+explorations/
+tmp/
+
+# Local runtime data
+packages/init/.zenbu/db/

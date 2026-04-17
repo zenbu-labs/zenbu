@@ -1,0 +1,117 @@
+---
+title: Myths About Effect
+description: Debunking common misconceptions about Effect's performance, complexity, and use cases.
+sidebar:
+  label: Myths
+  order: 1
+---
+
+## Effect heavily relies on generators and generators are slow!
+
+Effect's internals are not built on generators, we only use generators to provide an API which closely mimics async-await. Internally async-await uses the same mechanics as generators and they are equally performant. So if you don't have a problem with async-await you won't have a problem with Effect's generators.
+
+Where generators and iterables are unacceptably slow is in transforming collections of data, for that try to use plain arrays as much as possible.
+
+## Effect will make your code 500x slower!
+
+Effect does perform 500x slower if you are comparing:
+
+```ts twoslash
+const result = 1 + 1
+```
+
+to
+
+```ts twoslash
+import { Effect } from "effect"
+
+const result = Effect.runSync(
+  Effect.zipWith(Effect.succeed(1), Effect.succeed(1), (a, b) => a + b)
+)
+```
+
+The reason is one operation is optimized by the JIT compiler to be a direct CPU instruction and the other isn't.
+
+In reality you'd never use Effect in such cases, Effect is an app-level library to tame concurrency, error handling, and much more!
+
+You'd use Effect to coordinate your thunks of code, and you can build your thunks of code in the best perfoming manner as you see fit while still controlling execution through Effect.
+
+## Effect has a huge performance overhead!
+
+Depends what you mean by performance, many times performance bottlenecks in JS are due to bad management of concurrency.
+
+Thanks to structured concurrency and observability it becomes much easier to spot and optimize those issues.
+
+There are apps in frontend running at 120fps that use Effect intensively, so most likely effect won't be your perf problem.
+
+In regards of memory, it doesn't use much more memory than a normal program would, there are a few more allocations compared to non Effect code but usually this is no longer the case when the non Effect code does the same thing as the Effect code.
+
+The advice would be start using it and monitor your code, optimise out of need not out of thought, optimizing too early is the root of all evils in software design.
+
+## The bundle size is HUGE!
+
+Effect's minimum cost is about 25k of gzipped code, that chunk contains the Effect Runtime and already includes almost all the functions that you'll need in a normal app-code scenario.
+
+From that point on Effect is tree-shaking friendly so you'll only include what you use.
+
+Also when using Effect your own code becomes shorter and terser, so the overall cost is amortized with usage, we have apps where adopting Effect in the majority of the codebase led to reduction of the final bundle.
+
+## Effect is impossible to learn, there are so many functions and modules!
+
+True, the full Effect ecosystem is quite large and some modules contain 1000s of functions, the reality is that you don't need to know them all to start being productive, you can safely start using Effect knowing just 10-20 functions and progressively discover the rest, just like you can start using TypeScript without knowing every single NPM package.
+
+A short list of commonly used functions to begin are:
+
+- [Effect.succeed](/docs/getting-started/creating-effects/#succeed)
+- [Effect.fail](/docs/getting-started/creating-effects/#fail)
+- [Effect.sync](/docs/getting-started/creating-effects/#sync)
+- [Effect.tryPromise](/docs/getting-started/creating-effects/#trypromise)
+- [Effect.gen](/docs/getting-started/using-generators/)
+- [Effect.runPromise](/docs/getting-started/running-effects/#runpromise)
+- [Effect.catchTag](/docs/error-management/expected-errors/#catchtag)
+- [Effect.catchAll](/docs/error-management/expected-errors/#catchall)
+- [Effect.acquireRelease](/docs/resource-management/scope/#acquirerelease)
+- [Effect.acquireUseRelease](/docs/resource-management/introduction/#acquireuserelease)
+- [Effect.provide](/docs/requirements-management/layers/#providing-a-layer-to-an-effect)
+- [Effect.provideService](/docs/requirements-management/services/#providing-a-service-implementation)
+- [Effect.andThen](/docs/getting-started/building-pipelines/#andthen)
+- [Effect.map](/docs/getting-started/building-pipelines/#map)
+- [Effect.tap](/docs/getting-started/building-pipelines/#tap)
+
+A short list of commonly used modules:
+
+- [Effect](https://effect-ts.github.io/effect/effect/Effect.ts.html)
+- [Context](/docs/requirements-management/services/#creating-a-service)
+- [Layer](/docs/requirements-management/layers/)
+- [Option](/docs/data-types/option/)
+- [Either](/docs/data-types/either/)
+- [Array](https://effect-ts.github.io/effect/effect/Array.ts.html)
+- [Match](/docs/code-style/pattern-matching/)
+
+## Effect is the same as RxJS and shares its problems
+
+This is a sensitive topic, let's start by saying that RxJS is a great project and that it has helped millions of developers write reliable software and we all should be thankful to the developers who contributed to such an amazing project.
+
+Discussing the scope of the projects, RxJS aims to make working with Observables easy and wants to provide reactive extensions to JS, Effect instead wants to make writing production-grade TypeScript easy. While the intersection is non-empty the projects have fundamentally different objectives and strategies.
+
+Sometimes people refer to RxJS in bad light, and the reason isn't RxJS in itself but rather usage of RxJS in problem domains where RxJS wasn't thought to be used.
+
+Namely the idea that "everything is a stream" is theoretically true but it leads to fundamental limitations on developer experience, the primary issue being that streams are multi-shot (emit potentially multiple elements, or zero) and mutable delimited continuations (JS Generators) are known to be only good to represent single-shot effects (that emit a single value).
+
+In short it means that writing in imperative style (think of async/await) is practically impossible with stream primitives (practically because there would be the option of replaying the generator at every element and at every step, but this tends to be inefficient and the semantics of it are counter-intuitive, it would only work under the assumption that the full body is free of side-effects), forcing the developer to use declarative approaches such as pipe to represent all of their code.
+
+Effect has a Stream module (which is pull-based instead of push-based in order to be memory constant), but the basic Effect type is single-shot and it is optimised to act as a smart & lazy Promise that enables imperative programming, so when using Effect you're not forced to use a declarative style for everything and you can program using a model which is similar to async-await.
+
+The other big difference is that RxJS only cares about the happy-path with explicit types, it doesn't offer a way of typing errors and dependencies, Effect instead consider both errors and dependencies as explicitely typed and offers control-flow around those in a fully type-safe manner.
+
+In short if you need reactive programming around Observables, use RxJS, if you need to write production-grade TypeScript that includes by default native telemetry, error handling, dependency injection, and more use Effect.
+
+## Effect should be a language or Use a different language
+
+Neither solve the issue of writing production grade software in TypeScript.
+
+TypeScript is an amazing language to write full stack code with deep roots in the JS ecosystem and wide compatibility of tools, it is an industrial language adopted by many large scale companies.
+
+The fact that something like Effect is possible within the language and the fact that the language supports things such as generators that allows for imperative programming with custom types such as Effect makes TypeScript a unique language.
+
+In fact even in functional languages such as Scala the interop with effect systems is less optimal than it is in TypeScript, to the point that effect system authors have expressed wish for their language to support as much as TypeScript supports.

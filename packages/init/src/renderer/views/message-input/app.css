@@ -1,0 +1,11 @@
+@import "tailwindcss";
+@import "../../styles/shadcn.css";
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+}

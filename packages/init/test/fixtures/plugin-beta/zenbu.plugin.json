@@ -1,0 +1,5 @@
+{
+  "name": "beta",
+  "schema": "./schema.ts",
+  "migrations": "./kyju/index.ts"
+}

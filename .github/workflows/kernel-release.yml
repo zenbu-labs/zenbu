@@ -1,0 +1,82 @@
+name: Kernel Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver version (e.g. 0.1.0). Updates apps/kernel/package.json before build."
+        required: true
+        type: string
+      draft:
+        description: "Create the GitHub release as a draft"
+        required: false
+        type: boolean
+        default: true
+      prerelease:
+        description: "Mark the GitHub release as a prerelease"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: kernel-release-${{ github.event.inputs.version }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: mac
+          - os: windows-latest
+            target: win
+          - os: ubuntu-latest
+            target: linux
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Set version
+        working-directory: apps/kernel
+        shell: bash
+        run: npm version "${{ inputs.version }}" --no-git-tag-version --allow-same-version
+
+      - name: Build JS bundle
+        working-directory: apps/kernel
+        run: pnpm run build
+
+      - name: Package & Publish (${{ matrix.target }})
+        working-directory: apps/kernel
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          EP_DRAFT: ${{ inputs.draft }}
+          EP_PRE_RELEASE: ${{ inputs.prerelease }}
+        run: pnpm exec electron-builder --${{ matrix.target }} --publish always

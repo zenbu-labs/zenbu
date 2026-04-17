@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
+    Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+}
+
+.tree-view-output {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow: auto;
+}

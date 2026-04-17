@@ -1,0 +1,250 @@
+---
+title: Schema to Arbitrary
+description: Generate random test data that adheres to schema constraints using Arbitrary, with options for transformations, filters, and custom generation.
+sidebar:
+  label: Arbitrary
+  order: 15
+---
+
+import { Aside } from "@astrojs/starlight/components"
+
+The `Arbitrary.make` function allows for the creation of random values that align with a specific `Schema<A, I, R>`.
+This function returns an `Arbitrary<A>` from the [fast-check](https://github.com/dubzzz/fast-check) library,
+which is particularly useful for generating random test data that adheres to the defined schema constraints.
+
+**Example** (Generating Arbitrary Data for a Schema)
+
+```ts twoslash
+import { Arbitrary, FastCheck, Schema } from "effect"
+
+// Define a Person schema with constraints
+const Person = Schema.Struct({
+  name: Schema.NonEmptyString,
+  age: Schema.Int.pipe(Schema.between(1, 80))
+})
+
+// Create an Arbitrary based on the schema
+const arb = Arbitrary.make(Person)
+
+// Generate random samples from the Arbitrary
+console.log(FastCheck.sample(arb, 2))
+/*
+Example Output:
+[ { name: 'q r', age: 3 }, { name: '&|', age: 6 } ]
+*/
+```
+
+To make the output more realistic, see the [Customizing Arbitrary Data Generation](#customizing-arbitrary-data-generation) section.
+
+<Aside type="tip" title="Access FastCheck API">
+  The entirety of `fast-check`'s API is accessible via the `FastCheck`
+  export, allowing direct use of all its functionalities within your
+  projects.
+</Aside>
+
+## Filters
+
+When generating random values, `Arbitrary` tries to follow the schema's constraints. It uses the most appropriate `fast-check` primitives and applies constraints if the primitive supports them.
+
+For instance, if you define an `age` property as:
+
+```ts showLineNumbers=false
+Schema.Int.pipe(Schema.between(1, 80))
+```
+
+the arbitrary generation will use:
+
+```ts showLineNumbers=false
+FastCheck.integer({ min: 1, max: 80 })
+```
+
+to produce values within that range.
+
+<Aside type="note" title="Avoiding Conflicts in Filters">
+When using multiple filters, be aware that conflicting filters might lead to hangs during arbitrary data generation. This can occur when the constraints make it difficult or impossible to produce valid values.
+
+For guidance on mitigating these issues, refer to [this discussion](https://github.com/dubzzz/fast-check/discussions/4659).
+
+</Aside>
+
+### Patterns
+
+To generate efficient arbitraries for strings that must match a certain pattern, use the `Schema.pattern` filter instead of writing a custom filter:
+
+**Example** (Using `Schema.pattern` for Pattern Constraints)
+
+```ts twoslash
+import { Schema } from "effect"
+
+// ❌ Without using Schema.pattern (less efficient)
+const Bad = Schema.String.pipe(Schema.filter((s) => /^[a-z]+$/.test(s)))
+
+// ✅ Using Schema.pattern (more efficient)
+const Good = Schema.String.pipe(Schema.pattern(/^[a-z]+$/))
+```
+
+By using `Schema.pattern`, arbitrary generation will rely on `FastCheck.stringMatching(regexp)`, which is more efficient and directly aligned with the defined pattern.
+
+When multiple patterns are used, they are combined into a union. For example:
+
+```ts
+(?:${pattern1})|(?:${pattern2})
+```
+
+This approach ensures all patterns have an equal chance of generating values when using `FastCheck.stringMatching`.
+
+## Transformations and Arbitrary Generation
+
+When generating arbitrary data, it is important to understand how transformations and filters are handled within a schema:
+
+<Aside type="caution" title="Filters Ignored">
+  Filters applied before the last transformation in the transformation
+  chain are not considered during the generation of arbitrary data.
+</Aside>
+
+**Example** (Filters and Transformations)
+
+```ts twoslash
+import { Arbitrary, FastCheck, Schema } from "effect"
+
+// Schema with filters before the transformation
+const schema1 = Schema.compose(Schema.NonEmptyString, Schema.Trim).pipe(
+  Schema.maxLength(500)
+)
+
+// May produce empty strings due to ignored NonEmpty filter
+console.log(FastCheck.sample(Arbitrary.make(schema1), 2))
+/*
+Example Output:
+[ '', '"Ry' ]
+*/
+
+// Schema with filters applied after transformations
+const schema2 = Schema.Trim.pipe(
+  Schema.nonEmptyString(),
+  Schema.maxLength(500)
+)
+
+// Adheres to all filters, avoiding empty strings
+console.log(FastCheck.sample(Arbitrary.make(schema2), 2))
+/*
+Example Output:
+[ ']H+MPXgZKz', 'SNS|waP~\\' ]
+*/
+```
+
+**Explanation:**
+
+- `schema1`: Takes into account `Schema.maxLength(500)` since it is applied after the `Schema.Trim` transformation, but ignores the `Schema.NonEmptyString` as it precedes the transformations.
+- `schema2`: Adheres fully to all filters because they are correctly sequenced after transformations, preventing the generation of undesired data.
+
+### Best Practices
+
+To ensure consistent and valid arbitrary data generation, follow these guidelines:
+
+1. **Apply Filters First**: Define filters for the initial type (`I`).
+2. **Apply Transformations**: Add transformations to convert the data.
+3. **Apply Final Filters**: Use filters for the transformed type (`A`).
+
+This setup ensures that each stage of data processing is precise and well-defined.
+
+**Example** (Avoid Mixed Filters and Transformations)
+
+Avoid haphazard combinations of transformations and filters:
+
+```ts twoslash
+import { Schema } from "effect"
+
+// Less optimal approach: Mixing transformations and filters
+const problematic = Schema.compose(Schema.Lowercase, Schema.Trim)
+```
+
+Prefer a structured approach by separating transformation steps from filter applications:
+
+**Example** (Preferred Structured Approach)
+
+```ts twoslash
+import { Schema } from "effect"
+
+// Recommended: Separate transformations and filters
+const improved = Schema.transform(
+  Schema.String,
+  Schema.String.pipe(Schema.trimmed(), Schema.lowercased()),
+  {
+    strict: true,
+    decode: (s) => s.trim().toLowerCase(),
+    encode: (s) => s
+  }
+)
+```
+
+## Customizing Arbitrary Data Generation
+
+You can customize how arbitrary data is generated using the `arbitrary` annotation in schema definitions.
+
+**Example** (Custom Arbitrary Generator)
+
+```ts twoslash
+import { Arbitrary, FastCheck, Schema } from "effect"
+
+const Name = Schema.NonEmptyString.annotations({
+  arbitrary: () => (fc) =>
+    fc.constantFrom("Alice Johnson", "Dante Howell", "Marta Reyes")
+})
+
+const Age = Schema.Int.pipe(Schema.between(1, 80))
+
+const Person = Schema.Struct({
+  name: Name,
+  age: Age
+})
+
+const arb = Arbitrary.make(Person)
+
+console.log(FastCheck.sample(arb, 2))
+/*
+Example Output:
+[ { name: 'Dante Howell', age: 6 }, { name: 'Marta Reyes', age: 53 } ]
+*/
+```
+
+The annotation allows access the complete export of the fast-check library (`fc`).
+This setup enables you to return an `Arbitrary` that precisely generates the type of data desired.
+
+### Integration with Fake Data Generators
+
+When using mocking libraries like [@faker-js/faker](https://www.npmjs.com/package/@faker-js/faker),
+you can combine them with `fast-check` to generate realistic data for testing purposes.
+
+**Example** (Integrating with Faker)
+
+```ts twoslash
+import { Arbitrary, FastCheck, Schema } from "effect"
+import { faker } from "@faker-js/faker"
+
+const Name = Schema.NonEmptyString.annotations({
+  arbitrary: () => (fc) =>
+    fc.constant(null).map(() => {
+      // Each time the arbitrary is sampled, faker generates a new name
+      return faker.person.fullName()
+    })
+})
+
+const Age = Schema.Int.pipe(Schema.between(1, 80))
+
+const Person = Schema.Struct({
+  name: Name,
+  age: Age
+})
+
+const arb = Arbitrary.make(Person)
+
+console.log(FastCheck.sample(arb, 2))
+/*
+Example Output:
+[
+  { name: 'Henry Dietrich', age: 68 },
+  { name: 'Lucas Haag', age: 52 }
+]
+*/
+```

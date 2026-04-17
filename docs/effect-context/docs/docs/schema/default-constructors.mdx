@@ -1,0 +1,451 @@
+---
+title: Default Constructors
+description: Create values that conform to schemas effortlessly using default constructors for structs, records, filters, and branded types, with options for validation, default values, and lazy evaluation.
+sidebar:
+  order: 12
+---
+
+import { Aside } from "@astrojs/starlight/components"
+
+When working with data structures, it can be helpful to create values that conform to a schema with minimal effort.
+For this purpose, the Schema module provides default constructors for various schema types, including `Structs`, `Records`, `filters`, and `brands`.
+
+<Aside type="note" title="Constructor Scope">
+  Default constructors associated with a schema of type `Schema<A, I, R>` operate specifically on the **decoded type** (`A`), not the encoded type (`I`).
+
+- **`A` (Decoded Type)**: This is the type produced after decoding and validation. The constructor creates values of this type.
+- `I` (Encoded Type): This is the type expected when decoding raw input. The constructor does not accept this type directly.
+
+This distinction is important when working with schemas that transform data. For example, if a schema **decodes a string into a number**, the default constructor will only accept **numbers**, not strings.
+
+</Aside>
+
+Default constructors are **unsafe**, meaning they **throw an error** if the input does not conform to the schema.
+If you need a safer alternative, consider using [Schema.validateEither](#error-handling-in-constructors), which returns a result indicating success or failure instead of throwing an error.
+
+**Example** (Using a Refinement Default Constructor)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const schema = Schema.NumberFromString.pipe(Schema.between(1, 10))
+
+// The constructor only accepts numbers
+console.log(schema.make(5))
+// Output: 5
+
+// This will throw an error because the number is outside the valid range
+console.log(schema.make(20))
+/*
+throws:
+ParseError: between(1, 10)
+└─ Predicate refinement failure
+   └─ Expected a number between 1 and 10, actual 20
+*/
+```
+
+## Structs
+
+Struct schemas allow you to define objects with specific fields and constraints. The `make` function can be used to create instances of a struct schema.
+
+**Example** (Creating Struct Instances)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const Struct = Schema.Struct({
+  name: Schema.NonEmptyString
+})
+
+// Successful creation
+Struct.make({ name: "a" })
+
+// This will throw an error because the name is empty
+Struct.make({ name: "" })
+/*
+throws
+ParseError: { readonly name: NonEmptyString }
+└─ ["name"]
+   └─ NonEmptyString
+      └─ Predicate refinement failure
+         └─ Expected NonEmptyString, actual ""
+*/
+```
+
+In some cases, you might need to bypass validation. While not recommended in most scenarios, `make` provides an option to disable validation.
+
+**Example** (Bypassing Validation)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const Struct = Schema.Struct({
+  name: Schema.NonEmptyString
+})
+
+// Bypass validation during instantiation
+Struct.make({ name: "" }, true)
+
+// Or use the `disableValidation` option explicitly
+Struct.make({ name: "" }, { disableValidation: true })
+```
+
+## Records
+
+Record schemas allow you to define key-value mappings where the keys and values must meet specific criteria.
+
+**Example** (Creating Record Instances)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const Record = Schema.Record({
+  key: Schema.String,
+  value: Schema.NonEmptyString
+})
+
+// Successful creation
+Record.make({ a: "a", b: "b" })
+
+// This will throw an error because 'b' is empty
+Record.make({ a: "a", b: "" })
+/*
+throws
+ParseError: { readonly [x: string]: NonEmptyString }
+└─ ["b"]
+   └─ NonEmptyString
+      └─ Predicate refinement failure
+         └─ Expected NonEmptyString, actual ""
+*/
+
+// Bypasses validation
+Record.make({ a: "a", b: "" }, { disableValidation: true })
+```
+
+## Filters
+
+Filters allow you to define constraints on individual values.
+
+**Example** (Using Filters to Enforce Ranges)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const MyNumber = Schema.Number.pipe(Schema.between(1, 10))
+
+// Successful creation
+const n = MyNumber.make(5)
+
+// This will throw an error because the number is outside the valid range
+MyNumber.make(20)
+/*
+throws
+ParseError: a number between 1 and 10
+└─ Predicate refinement failure
+   └─ Expected a number between 1 and 10, actual 20
+*/
+
+// Bypasses validation
+MyNumber.make(20, { disableValidation: true })
+```
+
+## Branded Types
+
+Branded schemas add metadata to a value to give it a more specific type, while still retaining its original type.
+
+**Example** (Creating Branded Values)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const BrandedNumberSchema = Schema.Number.pipe(
+  Schema.between(1, 10),
+  Schema.brand("MyNumber")
+)
+
+// Successful creation
+const n = BrandedNumberSchema.make(5)
+
+// This will throw an error because the number is outside the valid range
+BrandedNumberSchema.make(20)
+/*
+throws
+ParseError: a number between 1 and 10 & Brand<"MyNumber">
+└─ Predicate refinement failure
+   └─ Expected a number between 1 and 10 & Brand<"MyNumber">, actual 20
+*/
+
+// Bypasses validation
+BrandedNumberSchema.make(20, { disableValidation: true })
+```
+
+When using default constructors, it is helpful to understand the type of value they produce.
+
+For instance, in the `BrandedNumberSchema` example, the return type of the constructor is `number & Brand<"MyNumber">`. This indicates that the resulting value is a `number` with additional branding information, `"MyNumber"`.
+
+This behavior contrasts with the filter example, where the return type is simply `number`. Branding adds an extra layer of type information, which can assist in identifying and working with your data more effectively.
+
+## Error Handling in Constructors
+
+Default constructors are considered "unsafe" because they throw an error if the input does not conform to the schema. This error includes a detailed description of what went wrong. The intention behind default constructors is to provide a straightforward way to create valid values, such as for tests or configurations, where invalid inputs are expected to be exceptional cases.
+
+If you need a "safe" constructor that does not throw errors but instead returns a result indicating success or failure, you can use `Schema.validateEither`.
+
+**Example** (Using `Schema.validateEither` for Safe Validation)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const schema = Schema.NumberFromString.pipe(Schema.between(1, 10))
+
+// Create a safe constructor that validates an unknown input
+const safeMake = Schema.validateEither(schema)
+
+// Valid input returns a Right value
+console.log(safeMake(5))
+/*
+Output:
+{ _id: 'Either', _tag: 'Right', right: 5 }
+*/
+
+// Invalid input returns a Left value with detailed error information
+console.log(safeMake(20))
+/*
+Output:
+{
+  _id: 'Either',
+  _tag: 'Left',
+  left: {
+    _id: 'ParseError',
+    message: 'between(1, 10)\n' +
+      '└─ Predicate refinement failure\n' +
+      '   └─ Expected a number between 1 and 10, actual 20'
+  }
+}
+*/
+
+// This will throw an error because it's unsafe
+schema.make(20)
+/*
+throws:
+ParseError: between(1, 10)
+└─ Predicate refinement failure
+   └─ Expected a number between 1 and 10, actual 20
+*/
+```
+
+## Setting Default Values
+
+When creating objects, you might want to assign default values to certain fields to simplify object construction. The `Schema.withConstructorDefault` function lets you handle default values, making fields optional in the default constructor.
+
+**Example** (Struct with Required Fields)
+
+In this example, all fields are required when creating a new instance.
+
+```ts twoslash
+import { Schema } from "effect"
+
+const Person = Schema.Struct({
+  name: Schema.NonEmptyString,
+  age: Schema.Number
+})
+
+// Both name and age must be provided
+console.log(Person.make({ name: "John", age: 30 }))
+/*
+Output: { name: 'John', age: 30 }
+*/
+```
+
+**Example** (Struct with Default Value)
+
+Here, the `age` field is optional because it has a default value of `0`.
+
+```ts twoslash
+import { Schema } from "effect"
+
+const Person = Schema.Struct({
+  name: Schema.NonEmptyString,
+  age: Schema.Number.pipe(
+    Schema.propertySignature,
+    Schema.withConstructorDefault(() => 0)
+  )
+})
+
+// The age field is optional and defaults to 0
+console.log(Person.make({ name: "John" }))
+/*
+Output:
+{ name: 'John', age: 0 }
+*/
+
+console.log(Person.make({ name: "John", age: 30 }))
+/*
+Output:
+{ name: 'John', age: 30 }
+*/
+```
+
+### Nested Structs and Shallow Defaults
+
+Default values in schemas are shallow, meaning that defaults defined in nested structs do not automatically propagate to the top-level constructor.
+
+**Example** (Shallow Defaults in Nested Structs)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const Config = Schema.Struct({
+  // Define a nested struct with a default value
+  web: Schema.Struct({
+    application_url: Schema.String.pipe(
+      Schema.propertySignature,
+      Schema.withConstructorDefault(() => "http://localhost")
+    ),
+    application_port: Schema.Number
+  })
+})
+
+// This will cause a type error because `application_url`
+// is missing in the nested struct
+// @errors: 2741
+Config.make({ web: { application_port: 3000 } })
+```
+
+This behavior occurs because the `Schema` interface does not include a type parameter to carry over default constructor types from nested structs.
+
+To work around this limitation, extract the constructor for the nested struct and apply it to its fields directly. This ensures that the nested defaults are respected.
+
+**Example** (Using Nested Struct Constructors)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const Config = Schema.Struct({
+  web: Schema.Struct({
+    application_url: Schema.String.pipe(
+      Schema.propertySignature,
+      Schema.withConstructorDefault(() => "http://localhost")
+    ),
+    application_port: Schema.Number
+  })
+})
+
+// Extract the nested struct constructor
+const { web: Web } = Config.fields
+
+// Use the constructor for the nested struct
+console.log(Config.make({ web: Web.make({ application_port: 3000 }) }))
+/*
+Output:
+{
+  web: {
+    application_url: 'http://localhost',
+    application_port: 3000
+  }
+}
+*/
+```
+
+### Lazy Evaluation of Defaults
+
+Defaults are lazily evaluated, meaning that a new instance of the default is generated every time the constructor is called:
+
+**Example** (Lazy Evaluation of Defaults)
+
+In this example, the `timestamp` field generates a new value for each instance.
+
+```ts twoslash
+import { Schema } from "effect"
+
+const Person = Schema.Struct({
+  name: Schema.NonEmptyString,
+  age: Schema.Number.pipe(
+    Schema.propertySignature,
+    Schema.withConstructorDefault(() => 0)
+  ),
+  timestamp: Schema.Number.pipe(
+    Schema.propertySignature,
+    Schema.withConstructorDefault(() => new Date().getTime())
+  )
+})
+
+console.log(Person.make({ name: "name1" }))
+/*
+Example Output:
+{ age: 0, timestamp: 1714232909221, name: 'name1' }
+*/
+
+console.log(Person.make({ name: "name2" }))
+/*
+Example Output:
+{ age: 0, timestamp: 1714232909227, name: 'name2' }
+*/
+```
+
+### Reusing Defaults Across Schemas
+
+Default values are also "portable", meaning that if you reuse the same property signature in another schema, the default is carried over:
+
+**Example** (Reusing Defaults in Another Schema)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const Person = Schema.Struct({
+  name: Schema.NonEmptyString,
+  age: Schema.Number.pipe(
+    Schema.propertySignature,
+    Schema.withConstructorDefault(() => 0)
+  ),
+  timestamp: Schema.Number.pipe(
+    Schema.propertySignature,
+    Schema.withConstructorDefault(() => new Date().getTime())
+  )
+})
+
+const AnotherSchema = Schema.Struct({
+  foo: Schema.String,
+  age: Person.fields.age
+})
+
+console.log(AnotherSchema.make({ foo: "bar" }))
+/*
+Output:
+{ foo: 'bar', age: 0 }
+*/
+```
+
+### Using Defaults in Classes
+
+Default values can also be applied when working with the `Class` API, ensuring consistency across class-based schemas.
+
+**Example** (Defaults in a Class)
+
+```ts twoslash
+import { Schema } from "effect"
+
+class Person extends Schema.Class<Person>("Person")({
+  name: Schema.NonEmptyString,
+  age: Schema.Number.pipe(
+    Schema.propertySignature,
+    Schema.withConstructorDefault(() => 0)
+  ),
+  timestamp: Schema.Number.pipe(
+    Schema.propertySignature,
+    Schema.withConstructorDefault(() => new Date().getTime())
+  )
+}) {}
+
+console.log(new Person({ name: "name1" }))
+/*
+Example Output:
+Person { age: 0, timestamp: 1714400867208, name: 'name1' }
+*/
+
+console.log(new Person({ name: "name2" }))
+/*
+Example Output:
+Person { age: 0, timestamp: 1714400867215, name: 'name2' }
+*/
+```

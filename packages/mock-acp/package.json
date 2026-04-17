@@ -1,0 +1,52 @@
+{
+  "name": "@zenbu/mock-acp",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "src/index.ts",
+  "bin": {
+    "mock-acp": "src/index.ts",
+    "mock-acp-dashboard": "dashboard/scripts/launch.mjs"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "dashboard": "node dashboard/scripts/dev.mjs",
+    "dashboard:start": "electron dashboard/main/index.ts"
+  },
+  "hotHook": {
+    "boundaries": [
+      "./dashboard/main/services/**/*.ts",
+      "../*/src/**/*.ts"
+    ]
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^0.16.1",
+    "@zenbu/kyju": "workspace:*",
+    "@zenbu/zenrpc": "workspace:*",
+    "effect": "catalog:",
+    "electron-context-menu": "^4.1.2",
+    "hot-hook": "^0.4.0",
+    "lucide-react": "^0.577.0",
+    "nanoid": "^5.1.6",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "tailwind-merge": "^3.5.0",
+    "tw-animate-css": "^1.4.0",
+    "ws": "^8.18.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4",
+    "@types/node": "^22.13.10",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.18.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron": "^35.0.0",
+    "esbuild": "^0.25.0",
+    "tailwindcss": "^4",
+    "tsx": "^4.19.0",
+    "vite": "^6.0.0",
+    "vitest": "^3.1.1",
+    "typescript": "^5.4.5"
+  }
+}

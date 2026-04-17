@@ -1,0 +1,13 @@
+{
+  "name": "@zenbu/cdp-viewport-demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "tsx": "^4.19.0"
+  }
+}

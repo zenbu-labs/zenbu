@@ -1,0 +1,90 @@
+---
+title: Schema to Equivalence
+description: Generate and customize equivalence checks for data structures based on schema definitions.
+sidebar:
+  label: Equivalence
+  order: 17
+---
+
+The `Schema.equivalence` function allows you to generate an [Equivalence](/docs/schema/equivalence/) based on a schema definition.
+This function is designed to compare data structures for equivalence according to the rules defined in the schema.
+
+**Example** (Comparing Structs for Equivalence)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const Person = Schema.Struct({
+  name: Schema.String,
+  age: Schema.Number
+})
+
+// Generate an equivalence function based on the schema
+const PersonEquivalence = Schema.equivalence(Person)
+
+const john = { name: "John", age: 23 }
+const alice = { name: "Alice", age: 30 }
+
+// Use the equivalence function to compare objects
+
+console.log(PersonEquivalence(john, { name: "John", age: 23 }))
+// Output: true
+
+console.log(PersonEquivalence(john, alice))
+// Output: false
+```
+
+## Equivalence for Any, Unknown, and Object
+
+When working with the following schemas:
+
+- `Schema.Any`
+- `Schema.Unknown`
+- `Schema.Object`
+- `Schema.Struct({})` (representing the broad `{}` TypeScript type)
+
+the most sensible form of equivalence is to use `Equal.equals` from the [Equal](/docs/trait/equal/) module, which defaults to reference equality (`===`).
+This is because these types can hold almost any kind of value.
+
+**Example** (Comparing Empty Objects Using Reference Equality)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const schema = Schema.Struct({})
+
+const input1 = {}
+const input2 = {}
+
+console.log(Schema.equivalence(schema)(input1, input2))
+// Output: false (because they are different references)
+```
+
+## Customizing Equivalence Generation
+
+You can customize the equivalence logic by providing an `equivalence` annotation in the schema definition.
+
+The `equivalence` annotation takes any type parameters provided (`typeParameters`) and two values for comparison, returning a boolean based on the desired condition of equivalence.
+
+**Example** (Custom Equivalence for Strings)
+
+```ts twoslash
+import { Schema } from "effect"
+
+// Define a schema with a custom equivalence annotation
+const schema = Schema.String.annotations({
+  equivalence: (/**typeParameters**/) => (s1, s2) =>
+    // Custom rule: Compare only the first character of the strings
+    s1.charAt(0) === s2.charAt(0)
+})
+
+// Generate the equivalence function
+const customEquivalence = Schema.equivalence(schema)
+
+// Use the custom equivalence function
+console.log(customEquivalence("aaa", "abb"))
+// Output: true (both start with 'a')
+
+console.log(customEquivalence("aaa", "bba"))
+// Output: false (strings start with different characters)
+```

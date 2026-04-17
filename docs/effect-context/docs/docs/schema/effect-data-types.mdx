@@ -1,0 +1,1947 @@
+---
+title: Effect Data Types
+description: Transform and manage various data types with schemas for enhanced JSON serialization, including support for options, eithers, sets, maps, durations, and sensitive redacted data.
+sidebar:
+  order: 13
+---
+
+import { Aside } from "@astrojs/starlight/components"
+
+## Interop With Data
+
+The [Data](/docs/data-types/data/) module in the Effect ecosystem simplifies value comparison by automatically implementing the [Equal](/docs/trait/equal/) and [Hash](/docs/trait/hash/) traits. This eliminates the need for manual implementations, making equality checks straightforward.
+
+**Example** (Comparing Structs with Data)
+
+```ts twoslash
+import { Data, Equal } from "effect"
+
+const person1 = Data.struct({ name: "Alice", age: 30 })
+const person2 = Data.struct({ name: "Alice", age: 30 })
+
+console.log(Equal.equals(person1, person2))
+// Output: true
+```
+
+By default, schemas like `Schema.Struct` do not implement the `Equal` and `Hash` traits. This means that two decoded objects with identical values will not be considered equal.
+
+**Example** (Default Behavior Without `Equal` and `Hash`)
+
+```ts twoslash
+import { Schema } from "effect"
+import { Equal } from "effect"
+
+const schema = Schema.Struct({
+  name: Schema.String,
+  age: Schema.Number
+})
+
+const decode = Schema.decode(schema)
+
+const person1 = decode({ name: "Alice", age: 30 })
+const person2 = decode({ name: "Alice", age: 30 })
+
+console.log(Equal.equals(person1, person2))
+// Output: false
+```
+
+The `Schema.Data` function can be used to enhance a schema by including the `Equal` and `Hash` traits. This allows the resulting objects to support value-based equality.
+
+**Example** (Using `Schema.Data` to Add Equality)
+
+```ts twoslash
+import { Schema } from "effect"
+import { Equal } from "effect"
+
+const schema = Schema.Data(
+  Schema.Struct({
+    name: Schema.String,
+    age: Schema.Number
+  })
+)
+
+const decode = Schema.decode(schema)
+
+const person1 = decode({ name: "Alice", age: 30 })
+const person2 = decode({ name: "Alice", age: 30 })
+
+console.log(Equal.equals(person1, person2))
+// Output: true
+```
+
+## Config
+
+The `Schema.Config` function allows you to decode and manage application configuration settings using structured schemas.
+It ensures consistency in configuration data and provides detailed feedback for decoding errors.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Config: <A, I extends string>(name: string, schema: Schema<A, I>) =>
+  Config<A>
+```
+
+This function takes two arguments:
+
+- `name`: Identifier for the configuration setting.
+- `schema`: Schema describing the expected data type and structure.
+
+It returns a [Config](/docs/configuration/) object that integrates with your application's configuration system.
+
+The Encoded type `I` must extend `string`, so the schema must be able to decode from a string, this includes schemas like `Schema.String`, `Schema.Literal("...")`, or `Schema.NumberFromString`, possibly with refinements applied.
+
+Behind the scenes, `Schema.Config` follows these steps:
+
+1. **Fetch the value** using the provided name (e.g. from an environment variable).
+2. **Decode the value** using the given schema. If the value is invalid, decoding fails.
+3. **Format any errors** using [TreeFormatter.formatErrorSync](/docs/schema/error-formatters/#treeformatter-default), which helps produce readable and detailed error messages.
+
+**Example** (Decoding a Configuration Value)
+
+```ts twoslash filename="config.ts"
+import { Effect, Schema } from "effect"
+
+// Define a config that expects a string with at least 4 characters
+const myConfig = Schema.Config(
+  "Foo",
+  Schema.String.pipe(Schema.minLength(4))
+)
+
+const program = Effect.gen(function* () {
+  const foo = yield* myConfig
+  console.log(`ok: ${foo}`)
+})
+
+Effect.runSync(program)
+```
+
+To test the configuration, execute the following commands:
+
+**Test** (with Missing Configuration Data)
+
+```sh showLineNumbers=false
+npx tsx config.ts
+# Output:
+# [(Missing data at Foo: "Expected Foo to exist in the process context")]
+```
+
+**Test** (with Invalid Data)
+
+```sh showLineNumbers=false
+Foo=bar npx tsx config.ts
+# Output:
+# [(Invalid data at Foo: "a string at least 4 character(s) long
+# └─ Predicate refinement failure
+#    └─ Expected a string at least 4 character(s) long, actual "bar"")]
+```
+
+**Test** (with Valid Data)
+
+```sh showLineNumbers=false
+Foo=foobar npx tsx config.ts
+# Output:
+# ok: foobar
+```
+
+## Option
+
+### Option
+
+The `Schema.Option` function is useful for converting an `Option` into a JSON-serializable format.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.Option(schema: Schema<A, I, R>)
+```
+
+##### Decoding
+
+| Input                        | Output                                                                              |
+| ---------------------------- | ----------------------------------------------------------------------------------- |
+| `{ _tag: "None" }`           | Converted to `Option.none()`                                                        |
+| `{ _tag: "Some", value: I }` | Converted to `Option.some(a)`, where `I` is decoded into `A` using the inner schema |
+
+##### Encoding
+
+| Input            | Output                                                                                          |
+| ---------------- | ----------------------------------------------------------------------------------------------- |
+| `Option.none()`  | Converted to `{ _tag: "None" }`                                                                 |
+| `Option.some(A)` | Converted to `{ _tag: "Some", value: I }`, where `A` is encoded into `I` using the inner schema |
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+import { Option } from "effect"
+
+const schema = Schema.Option(Schema.NumberFromString)
+
+//     ┌─── OptionEncoded<string>
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── Option<number>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(decode({ _tag: "None" }))
+// Output: { _id: 'Option', _tag: 'None' }
+
+console.log(decode({ _tag: "Some", value: "1" }))
+// Output: { _id: 'Option', _tag: 'Some', value: 1 }
+
+// Encoding examples
+
+console.log(encode(Option.none()))
+// Output: { _tag: 'None' }
+
+console.log(encode(Option.some(1)))
+// Output: { _tag: 'Some', value: '1' }
+```
+
+### OptionFromSelf
+
+The `Schema.OptionFromSelf` function is designed for scenarios where `Option` values are already in the `Option` format and need to be decoded or encoded while transforming the inner value according to the provided schema.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.OptionFromSelf(schema: Schema<A, I, R>)
+```
+
+#### Decoding
+
+| Input            | Output                                                                              |
+| ---------------- | ----------------------------------------------------------------------------------- |
+| `Option.none()`  | Remains as `Option.none()`                                                          |
+| `Option.some(I)` | Converted to `Option.some(A)`, where `I` is decoded into `A` using the inner schema |
+
+#### Encoding
+
+| Input            | Output                                                                              |
+| ---------------- | ----------------------------------------------------------------------------------- |
+| `Option.none()`  | Remains as `Option.none()`                                                          |
+| `Option.some(A)` | Converted to `Option.some(I)`, where `A` is encoded into `I` using the inner schema |
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+import { Option } from "effect"
+
+const schema = Schema.OptionFromSelf(Schema.NumberFromString)
+
+//     ┌─── Option<string>
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── Option<number>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(decode(Option.none()))
+// Output: { _id: 'Option', _tag: 'None' }
+
+console.log(decode(Option.some("1")))
+// Output: { _id: 'Option', _tag: 'Some', value: 1 }
+
+// Encoding examples
+
+console.log(encode(Option.none()))
+// Output: { _id: 'Option', _tag: 'None' }
+
+console.log(encode(Option.some(1)))
+// Output: { _id: 'Option', _tag: 'Some', value: '1' }
+```
+
+### OptionFromUndefinedOr
+
+The `Schema.OptionFromUndefinedOr` function handles cases where `undefined` is treated as `Option.none()`, and all other values are interpreted as `Option.some()` based on the provided schema.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.OptionFromUndefinedOr(schema: Schema<A, I, R>)
+```
+
+#### Decoding
+
+| Input       | Output                                                                              |
+| ----------- | ----------------------------------------------------------------------------------- |
+| `undefined` | Converted to `Option.none()`                                                        |
+| `I`         | Converted to `Option.some(A)`, where `I` is decoded into `A` using the inner schema |
+
+#### Encoding
+
+| Input            | Output                                                                 |
+| ---------------- | ---------------------------------------------------------------------- |
+| `Option.none()`  | Converted to `undefined`                                               |
+| `Option.some(A)` | Converted to `I`, where `A` is encoded into `I` using the inner schema |
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+import { Option } from "effect"
+
+const schema = Schema.OptionFromUndefinedOr(Schema.NumberFromString)
+
+//     ┌─── string | undefined
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── Option<number>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(decode(undefined))
+// Output: { _id: 'Option', _tag: 'None' }
+
+console.log(decode("1"))
+// Output: { _id: 'Option', _tag: 'Some', value: 1 }
+
+// Encoding examples
+
+console.log(encode(Option.none()))
+// Output: undefined
+
+console.log(encode(Option.some(1)))
+// Output: "1"
+```
+
+### OptionFromNullOr
+
+The `Schema.OptionFromUndefinedOr` function handles cases where `null` is treated as `Option.none()`, and all other values are interpreted as `Option.some()` based on the provided schema.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.OptionFromNullOr(schema: Schema<A, I, R>)
+```
+
+#### Decoding
+
+| Input  | Output                                                                              |
+| ------ | ----------------------------------------------------------------------------------- |
+| `null` | Converted to `Option.none()`                                                        |
+| `I`    | Converted to `Option.some(A)`, where `I` is decoded into `A` using the inner schema |
+
+#### Encoding
+
+| Input            | Output                                                                 |
+| ---------------- | ---------------------------------------------------------------------- |
+| `Option.none()`  | Converted to `null`                                                    |
+| `Option.some(A)` | Converted to `I`, where `A` is encoded into `I` using the inner schema |
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+import { Option } from "effect"
+
+const schema = Schema.OptionFromNullOr(Schema.NumberFromString)
+
+//     ┌─── string | null
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── Option<number>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(decode(null))
+// Output: { _id: 'Option', _tag: 'None' }
+
+console.log(decode("1"))
+// Output: { _id: 'Option', _tag: 'Some', value: 1 }
+
+// Encoding examples
+
+console.log(encode(Option.none()))
+// Output: null
+console.log(encode(Option.some(1)))
+// Output: "1"
+```
+
+### OptionFromNullishOr
+
+The `Schema.OptionFromNullishOr` function handles cases where `null` or `undefined` are treated as `Option.none()`, and all other values are interpreted as `Option.some()` based on the provided schema. Additionally, it allows customization of how `Option.none()` is encoded (`null` or `undefined`).
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.OptionFromNullishOr(
+  schema: Schema<A, I, R>,
+  onNoneEncoding: null | undefined
+)
+```
+
+#### Decoding
+
+| Input       | Output                                                                              |
+| ----------- | ----------------------------------------------------------------------------------- |
+| `undefined` | Converted to `Option.none()`                                                        |
+| `null`      | Converted to `Option.none()`                                                        |
+| `I`         | Converted to `Option.some(A)`, where `I` is decoded into `A` using the inner schema |
+
+#### Encoding
+
+| Input            | Output                                                                     |
+| ---------------- | -------------------------------------------------------------------------- |
+| `Option.none()`  | Converted to `undefined` or `null` based on user choice (`onNoneEncoding`) |
+| `Option.some(A)` | Converted to `I`, where `A` is encoded into `I` using the inner schema     |
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+import { Option } from "effect"
+
+const schema = Schema.OptionFromNullishOr(
+  Schema.NumberFromString,
+  undefined // Encode Option.none() as undefined
+)
+
+//     ┌─── string | null | undefined
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── Option<number>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(decode(null))
+// Output: { _id: 'Option', _tag: 'None' }
+
+console.log(decode(undefined))
+// Output: { _id: 'Option', _tag: 'None' }
+
+console.log(decode("1"))
+// Output: { _id: 'Option', _tag: 'Some', value: 1 }
+
+// Encoding examples
+
+console.log(encode(Option.none()))
+// Output: undefined
+
+console.log(encode(Option.some(1)))
+// Output: "1"
+```
+
+### OptionFromNonEmptyTrimmedString
+
+The `Schema.OptionFromNonEmptyTrimmedString` schema is designed for handling strings where trimmed empty strings are treated as `Option.none()`, and all other strings are converted to `Option.some()`.
+
+#### Decoding
+
+| Input       | Output                                                  |
+| ----------- | ------------------------------------------------------- |
+| `s: string` | Converted to `Option.some(s)`, if `s.trim().length > 0` |
+|             | Converted to `Option.none()` otherwise                  |
+
+#### Encoding
+
+| Input                    | Output            |
+| ------------------------ | ----------------- |
+| `Option.none()`          | Converted to `""` |
+| `Option.some(s: string)` | Converted to `s`  |
+
+**Example**
+
+```ts twoslash
+import { Schema, Option } from "effect"
+
+//     ┌─── string
+//     ▼
+type Encoded = typeof Schema.OptionFromNonEmptyTrimmedString
+
+//     ┌─── Option<string>
+//     ▼
+type Type = typeof Schema.OptionFromNonEmptyTrimmedString
+
+const decode = Schema.decodeUnknownSync(
+  Schema.OptionFromNonEmptyTrimmedString
+)
+const encode = Schema.encodeSync(Schema.OptionFromNonEmptyTrimmedString)
+
+// Decoding examples
+
+console.log(decode(""))
+// Output: { _id: 'Option', _tag: 'None' }
+
+console.log(decode(" a "))
+// Output: { _id: 'Option', _tag: 'Some', value: 'a' }
+
+console.log(decode("a"))
+// Output: { _id: 'Option', _tag: 'Some', value: 'a' }
+
+// Encoding examples
+
+console.log(encode(Option.none()))
+// Output: ""
+
+console.log(encode(Option.some("example")))
+// Output: "example"
+```
+
+## Either
+
+### Either
+
+The `Schema.Either` function is useful for converting an `Either` into a JSON-serializable format.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.Either(options: {
+  left: Schema<LA, LI, LR>,
+  right: Schema<RA, RI, RR>
+})
+```
+
+##### Decoding
+
+| Input                          | Output                                                                                          |
+| ------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `{ _tag: "Left", left: LI }`   | Converted to `Either.left(LA)`, where `LI` is decoded into `LA` using the inner `left` schema   |
+| `{ _tag: "Right", right: RI }` | Converted to `Either.right(RA)`, where `RI` is decoded into `RA` using the inner `right` schema |
+
+##### Encoding
+
+| Input              | Output                                                                                                      |
+| ------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `Either.left(LA)`  | Converted to `{ _tag: "Left", left: LI }`, where `LA` is encoded into `LI` using the inner `left` schema    |
+| `Either.right(RA)` | Converted to `{ _tag: "Right", right: RI }`, where `RA` is encoded into `RI` using the inner `right` schema |
+
+**Example**
+
+```ts twoslash
+import { Schema, Either } from "effect"
+
+const schema = Schema.Either({
+  left: Schema.Trim,
+  right: Schema.NumberFromString
+})
+
+//     ┌─── EitherEncoded<string, string>
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── Either<number, string>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(decode({ _tag: "Left", left: " a " }))
+// Output: { _id: 'Either', _tag: 'Left', left: 'a' }
+
+console.log(decode({ _tag: "Right", right: "1" }))
+// Output: { _id: 'Either', _tag: 'Right', right: 1 }
+
+// Encoding examples
+
+console.log(encode(Either.left("a")))
+// Output: { _tag: 'Left', left: 'a' }
+
+console.log(encode(Either.right(1)))
+// Output: { _tag: 'Right', right: '1' }
+```
+
+### EitherFromSelf
+
+The `Schema.EitherFromSelf` function is designed for scenarios where `Either` values are already in the `Either` format and need to be decoded or encoded while transforming the inner valued according to the provided schemas.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.EitherFromSelf(options: {
+  left: Schema<LA, LI, LR>,
+  right: Schema<RA, RI, RR>
+})
+```
+
+##### Decoding
+
+| Input              | Output                                                                                          |
+| ------------------ | ----------------------------------------------------------------------------------------------- |
+| `Either.left(LI)`  | Converted to `Either.left(LA)`, where `LI` is decoded into `LA` using the inner `left` schema   |
+| `Either.right(RI)` | Converted to `Either.right(RA)`, where `RI` is decoded into `RA` using the inner `right` schema |
+
+##### Encoding
+
+| Input              | Output                                                                                          |
+| ------------------ | ----------------------------------------------------------------------------------------------- |
+| `Either.left(LA)`  | Converted to `Either.left(LI)`, where `LA` is encoded into `LI` using the inner `left` schema   |
+| `Either.right(RA)` | Converted to `Either.right(RI)`, where `RA` is encoded into `RI` using the inner `right` schema |
+
+**Example**
+
+```ts twoslash
+import { Schema, Either } from "effect"
+
+const schema = Schema.EitherFromSelf({
+  left: Schema.Trim,
+  right: Schema.NumberFromString
+})
+
+//     ┌─── Either<string, string>
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── Either<number, string>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(decode(Either.left(" a ")))
+// Output: { _id: 'Either', _tag: 'Left', left: 'a' }
+
+console.log(decode(Either.right("1")))
+// Output: { _id: 'Either', _tag: 'Right', right: 1 }
+
+// Encoding examples
+
+console.log(encode(Either.left("a")))
+// Output: { _id: 'Either', _tag: 'Left', left: 'a' }
+
+console.log(encode(Either.right(1)))
+// Output: { _id: 'Either', _tag: 'Right', right: '1' }
+```
+
+### EitherFromUnion
+
+The `Schema.EitherFromUnion` function is designed to decode and encode `Either` values where the `left` and `right` sides are represented as distinct types. This schema enables conversions between raw union types and structured `Either` types.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.EitherFromUnion(options: {
+  left: Schema<LA, LI, LR>,
+  right: Schema<RA, RI, RR>
+})
+```
+
+##### Decoding
+
+| Input | Output                                                                                          |
+| ----- | ----------------------------------------------------------------------------------------------- |
+| `LI`  | Converted to `Either.left(LA)`, where `LI` is decoded into `LA` using the inner `left` schema   |
+| `RI`  | Converted to `Either.right(RA)`, where `RI` is decoded into `RA` using the inner `right` schema |
+
+##### Encoding
+
+| Input              | Output                                                                            |
+| ------------------ | --------------------------------------------------------------------------------- |
+| `Either.left(LA)`  | Converted to `LI`, where `LA` is encoded into `LI` using the inner `left` schema  |
+| `Either.right(RA)` | Converted to `RI`, where `RA` is encoded into `RI` using the inner `right` schema |
+
+**Example**
+
+```ts twoslash
+import { Schema, Either } from "effect"
+
+const schema = Schema.EitherFromUnion({
+  left: Schema.Boolean,
+  right: Schema.NumberFromString
+})
+
+//     ┌─── string | boolean
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── Either<number, boolean>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(decode(true))
+// Output: { _id: 'Either', _tag: 'Left', left: true }
+
+console.log(decode("1"))
+// Output: { _id: 'Either', _tag: 'Right', right: 1 }
+
+// Encoding examples
+
+console.log(encode(Either.left(true)))
+// Output: true
+
+console.log(encode(Either.right(1)))
+// Output: "1"
+```
+
+## Exit
+
+### Exit
+
+The `Schema.Exit` function is useful for converting an `Exit` into a JSON-serializable format.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.Exit(options: {
+  failure: Schema<FA, FI, FR>,
+  success: Schema<SA, SI, SR>,
+  defect: Schema<DA, DI, DR>
+})
+```
+
+##### Decoding
+
+| Input                                              | Output                                                                                                                                            |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{ _tag: "Failure", cause: CauseEncoded<FI, DI> }` | Converted to `Exit.failCause(Cause<FA>)`, where `CauseEncoded<FI, DI>` is decoded into `Cause<FA>` using the inner `failure` and `defect` schemas |
+| `{ _tag: "Success", value: SI }`                   | Converted to `Exit.succeed(SA)`, where `SI` is decoded into `SA` using the inner `success` schema                                                 |
+
+##### Encoding
+
+| Input                       | Output                                                                                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Exit.failCause(Cause<FA>)` | Converted to `{ _tag: "Failure", cause: CauseEncoded<FI, DI> }`, where `Cause<FA>` is encoded into `CauseEncoded<FI, DI>` using the inner `failure` and `defect` schemas |
+| `Exit.succeed(SA)`          | Converted to `{ _tag: "Success", value: SI }`, where `SA` is encoded into `SI` using the inner `success` schema                                                          |
+
+**Example**
+
+```ts twoslash
+import { Schema, Exit } from "effect"
+
+const schema = Schema.Exit({
+  failure: Schema.String,
+  success: Schema.NumberFromString,
+  defect: Schema.String
+})
+
+//     ┌─── ExitEncoded<string, string, string>
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── Exit<number, string>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(
+  decode({ _tag: "Failure", cause: { _tag: "Fail", error: "a" } })
+)
+/*
+Output:
+{
+  _id: 'Exit',
+  _tag: 'Failure',
+  cause: { _id: 'Cause', _tag: 'Fail', failure: 'a' }
+}
+*/
+
+console.log(decode({ _tag: "Success", value: "1" }))
+/*
+Output:
+{ _id: 'Exit', _tag: 'Success', value: 1 }
+*/
+
+// Encoding examples
+
+console.log(encode(Exit.fail("a")))
+/*
+Output:
+{ _tag: 'Failure', cause: { _tag: 'Fail', error: 'a' } }
+ */
+
+console.log(encode(Exit.succeed(1)))
+/*
+Output:
+{ _tag: 'Success', value: '1' }
+*/
+```
+
+### Handling Defects in Serialization
+
+Effect provides a built-in `Defect` schema to handle JavaScript errors (`Error` instances) and other types of unrecoverable defects.
+
+- When decoding, it reconstructs `Error` instances if the input has a `message` and optionally a `name` and `stack`.
+- When encoding, it converts `Error` instances into plain objects that retain only essential properties.
+
+This is useful when transmitting errors across network requests or logging systems where `Error` objects do not serialize by default.
+
+**Example** (Encoding and Decoding Defects)
+
+```ts twoslash
+import { Schema, Exit } from "effect"
+
+const schema = Schema.Exit({
+  failure: Schema.String,
+  success: Schema.NumberFromString,
+  defect: Schema.Defect
+})
+
+const decode = Schema.decodeSync(schema)
+const encode = Schema.encodeSync(schema)
+
+console.log(encode(Exit.die(new Error("Message"))))
+/*
+Output:
+{
+  _tag: 'Failure',
+  cause: { _tag: 'Die', defect: { name: 'Error', message: 'Message' } }
+}
+*/
+
+console.log(encode(Exit.fail("a")))
+
+console.log(
+  decode({
+    _tag: "Failure",
+    cause: { _tag: "Die", defect: { name: "Error", message: "Message" } }
+  })
+)
+/*
+Output:
+{
+  _id: 'Exit',
+  _tag: 'Failure',
+  cause: {
+    _id: 'Cause',
+    _tag: 'Die',
+    defect: [Error: Message] { [cause]: [Object] }
+  }
+}
+*/
+```
+
+### ExitFromSelf
+
+The `Schema.ExitFromSelf` function is designed for scenarios where `Exit` values are already in the `Exit` format and need to be decoded or encoded while transforming the inner valued according to the provided schemas.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.ExitFromSelf(options: {
+  failure: Schema<FA, FI, FR>,
+  success: Schema<SA, SI, SR>,
+  defect: Schema<DA, DI, DR>
+})
+```
+
+##### Decoding
+
+| Input                       | Output                                                                                                                                 |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `Exit.failCause(Cause<FI>)` | Converted to `Exit.failCause(Cause<FA>)`, where `Cause<FI>` is decoded into `Cause<FA>` using the inner `failure` and `defect` schemas |
+| `Exit.succeed(SI)`          | Converted to `Exit.succeed(SA)`, where `SI` is decoded into `SA` using the inner `success` schema                                      |
+
+##### Encoding
+
+| Input                       | Output                                                                                                                                 |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `Exit.failCause(Cause<FA>)` | Converted to `Exit.failCause(Cause<FI>)`, where `Cause<FA>` is decoded into `Cause<FI>` using the inner `failure` and `defect` schemas |
+| `Exit.succeed(SA)`          | Converted to `Exit.succeed(SI)`, where `SA` is encoded into `SI` using the inner `success` schema                                      |
+
+**Example**
+
+```ts twoslash
+import { Schema, Exit } from "effect"
+
+const schema = Schema.ExitFromSelf({
+  failure: Schema.String,
+  success: Schema.NumberFromString,
+  defect: Schema.String
+})
+
+//     ┌─── Exit<string, string>
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── Exit<number, string>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(decode(Exit.fail("a")))
+/*
+Output:
+{
+  _id: 'Exit',
+  _tag: 'Failure',
+  cause: { _id: 'Cause', _tag: 'Fail', failure: 'a' }
+}
+*/
+
+console.log(decode(Exit.succeed("1")))
+/*
+Output:
+{ _id: 'Exit', _tag: 'Success', value: 1 }
+*/
+
+// Encoding examples
+
+console.log(encode(Exit.fail("a")))
+/*
+Output:
+{
+  _id: 'Exit',
+  _tag: 'Failure',
+  cause: { _id: 'Cause', _tag: 'Fail', failure: 'a' }
+}
+*/
+
+console.log(encode(Exit.succeed(1)))
+/*
+Output:
+{ _id: 'Exit', _tag: 'Success', value: '1' }
+*/
+```
+
+## ReadonlySet
+
+### ReadonlySet
+
+The `Schema.ReadonlySet` function is useful for converting a `ReadonlySet` into a JSON-serializable format.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.ReadonlySet(schema: Schema<A, I, R>)
+```
+
+##### Decoding
+
+| Input              | Output                                                                              |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| `ReadonlyArray<I>` | Converted to `ReadonlySet<A>`, where `I` is decoded into `A` using the inner schema |
+
+##### Encoding
+
+| Input            | Output                                                                   |
+| ---------------- | ------------------------------------------------------------------------ |
+| `ReadonlySet<A>` | `ReadonlyArray<I>`, where `A` is encoded into `I` using the inner schema |
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+
+const schema = Schema.ReadonlySet(Schema.NumberFromString)
+
+//     ┌─── readonly string[]
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── ReadonlySet<number>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(decode(["1", "2", "3"]))
+// Output: Set(3) { 1, 2, 3 }
+
+// Encoding examples
+
+console.log(encode(new Set([1, 2, 3])))
+// Output: [ '1', '2', '3' ]
+```
+
+### ReadonlySetFromSelf
+
+The `Schema.ReadonlySetFromSelf` function is designed for scenarios where `ReadonlySet` values are already in the `ReadonlySet` format and need to be decoded or encoded while transforming the inner values according to the provided schema.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.ReadonlySetFromSelf(schema: Schema<A, I, R>)
+```
+
+##### Decoding
+
+| Input            | Output                                                                              |
+| ---------------- | ----------------------------------------------------------------------------------- |
+| `ReadonlySet<I>` | Converted to `ReadonlySet<A>`, where `I` is decoded into `A` using the inner schema |
+
+##### Encoding
+
+| Input            | Output                                                                 |
+| ---------------- | ---------------------------------------------------------------------- |
+| `ReadonlySet<A>` | `ReadonlySet<I>`, where `A` is encoded into `I` using the inner schema |
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+
+const schema = Schema.ReadonlySetFromSelf(Schema.NumberFromString)
+
+//     ┌─── ReadonlySet<string>
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── ReadonlySet<number>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(decode(new Set(["1", "2", "3"])))
+// Output: Set(3) { 1, 2, 3 }
+
+// Encoding examples
+
+console.log(encode(new Set([1, 2, 3])))
+// Output: Set(3) { '1', '2', '3' }
+```
+
+## ReadonlyMap
+
+The `Schema.ReadonlyMap` function is useful for converting a `ReadonlyMap` into a JSON-serializable format.
+
+### ReadonlyMap
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.ReadonlyMap(options: {
+  key: Schema<KA, KI, KR>,
+  value: Schema<VA, VI, VR>
+})
+```
+
+##### Decoding
+
+| Input                              | Output                                                                                                                                                        |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ReadonlyArray<readonly [KI, VI]>` | Converted to `ReadonlyMap<KA, VA>`, where `KI` is decoded into `KA` using the inner `key` schema and `VI` is decoded into `VA` using the inner `value` schema |
+
+##### Encoding
+
+| Input                 | Output                                                                                                                                                                     |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ReadonlyMap<KA, VA>` | Converted to `ReadonlyArray<readonly [KI, VI]>`, where `KA` is decoded into `KI` using the inner `key` schema and `VA` is decoded into `VI` using the inner `value` schema |
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+
+const schema = Schema.ReadonlyMap({
+  key: Schema.String,
+  value: Schema.NumberFromString
+})
+
+//     ┌─── readonly (readonly [string, string])[]
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── ReadonlyMap<string, number>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(
+  decode([
+    ["a", "2"],
+    ["b", "2"],
+    ["c", "3"]
+  ])
+)
+// Output: Map(3) { 'a' => 2, 'b' => 2, 'c' => 3 }
+
+// Encoding examples
+
+console.log(
+  encode(
+    new Map([
+      ["a", 1],
+      ["b", 2],
+      ["c", 3]
+    ])
+  )
+)
+// Output: [ [ 'a', '1' ], [ 'b', '2' ], [ 'c', '3' ] ]
+```
+
+### ReadonlyMapFromSelf
+
+The `Schema.ReadonlyMapFromSelf` function is designed for scenarios where `ReadonlyMap` values are already in the `ReadonlyMap` format and need to be decoded or encoded while transforming the inner values according to the provided schemas.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.ReadonlyMapFromSelf(options: {
+  key: Schema<KA, KI, KR>,
+  value: Schema<VA, VI, VR>
+})
+```
+
+##### Decoding
+
+| Input                 | Output                                                                                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ReadonlyMap<KI, VI>` | Converted to `ReadonlyMap<KA, VA>`, where `KI` is decoded into `KA` using the inner `key` schema and `VI` is decoded into `VA` using the inner `value` schema |
+
+##### Encoding
+
+| Input                 | Output                                                                                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ReadonlyMap<KA, VA>` | Converted to `ReadonlyMap<KI, VI>`, where `KA` is decoded into `KI` using the inner `key` schema and `VA` is decoded into `VI` using the inner `value` schema |
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+
+const schema = Schema.ReadonlyMapFromSelf({
+  key: Schema.String,
+  value: Schema.NumberFromString
+})
+
+//     ┌─── ReadonlyMap<string, string>
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── ReadonlyMap<string, number>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(
+  decode(
+    new Map([
+      ["a", "2"],
+      ["b", "2"],
+      ["c", "3"]
+    ])
+  )
+)
+// Output: Map(3) { 'a' => 2, 'b' => 2, 'c' => 3 }
+
+// Encoding examples
+
+console.log(
+  encode(
+    new Map([
+      ["a", 1],
+      ["b", 2],
+      ["c", 3]
+    ])
+  )
+)
+// Output: Map(3) { 'a' => '1', 'b' => '2', 'c' => '3' }
+```
+
+### ReadonlyMapFromRecord
+
+The `Schema.ReadonlyMapFromRecord` function is a utility to transform a `ReadonlyMap` into an object format, where keys are strings and values are serializable, and vice versa.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.ReadonlyMapFromRecord({
+  key: Schema<KA, KI, KR>,
+  value: Schema<VA, VI, VR>
+})
+```
+
+#### Decoding
+
+| Input                          | Output                                                                                                                               |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `{ readonly [x: string]: VI }` | Converts to `ReadonlyMap<KA, VA>`, where `x` is decoded into `KA` using the `key` schema and `VI` into `VA` using the `value` schema |
+
+#### Encoding
+
+| Input                 | Output                                                                                                                                        |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ReadonlyMap<KA, VA>` | Converts to `{ readonly [x: string]: VI }`, where `KA` is encoded into `x` using the `key` schema and `VA` into `VI` using the `value` schema |
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+
+const schema = Schema.ReadonlyMapFromRecord({
+  key: Schema.NumberFromString,
+  value: Schema.NumberFromString
+})
+
+//     ┌─── { readonly [x: string]: string; }
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── ReadonlyMap<number, number>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(
+  decode({
+    "1": "4",
+    "2": "5",
+    "3": "6"
+  })
+)
+// Output: Map(3) { 1 => 4, 2 => 5, 3 => 6 }
+
+// Encoding examples
+
+console.log(
+  encode(
+    new Map([
+      [1, 4],
+      [2, 5],
+      [3, 6]
+    ])
+  )
+)
+// Output: { '1': '4', '2': '5', '3': '6' }
+```
+
+## HashSet
+
+### HashSet
+
+The `Schema.HashSet` function provides a way to map between `HashSet` and an array representation, allowing for JSON serialization and deserialization.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.HashSet(schema: Schema<A, I, R>)
+```
+
+#### Decoding
+
+| Input              | Output                                                                                              |
+| ------------------ | --------------------------------------------------------------------------------------------------- |
+| `ReadonlyArray<I>` | Converts to `HashSet<A>`, where each element in the array is decoded into type `A` using the schema |
+
+#### Encoding
+
+| Input        | Output                                                                                                        |
+| ------------ | ------------------------------------------------------------------------------------------------------------- |
+| `HashSet<A>` | Converts to `ReadonlyArray<I>`, where each element in the `HashSet` is encoded into type `I` using the schema |
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+import { HashSet } from "effect"
+
+const schema = Schema.HashSet(Schema.NumberFromString)
+
+//     ┌─── readonly string[]
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── HashSet<number>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(decode(["1", "2", "3"]))
+// Output: { _id: 'HashSet', values: [ 1, 2, 3 ] }
+
+// Encoding examples
+
+console.log(encode(HashSet.fromIterable([1, 2, 3])))
+// Output: [ '1', '2', '3' ]
+```
+
+### HashSetFromSelf
+
+The `Schema.HashSetFromSelf` function is designed for scenarios where `HashSet` values are already in the `HashSet` format and need to be decoded or encoded while transforming the inner values according to the provided schema.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.HashSetFromSelf(schema: Schema<A, I, R>)
+```
+
+#### Decoding
+
+| Input        | Output                                                                                     |
+| ------------ | ------------------------------------------------------------------------------------------ |
+| `HashSet<I>` | Converts to `HashSet<A>`, decoding each element from type `I` to type `A` using the schema |
+
+#### Encoding
+
+| Input        | Output                                                                                     |
+| ------------ | ------------------------------------------------------------------------------------------ |
+| `HashSet<A>` | Converts to `HashSet<I>`, encoding each element from type `A` to type `I` using the schema |
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+import { HashSet } from "effect"
+
+const schema = Schema.HashSetFromSelf(Schema.NumberFromString)
+
+//     ┌─── HashSet<string>
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── HashSet<number>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(decode(HashSet.fromIterable(["1", "2", "3"])))
+// Output: { _id: 'HashSet', values: [ 1, 2, 3 ] }
+
+// Encoding examples
+
+console.log(encode(HashSet.fromIterable([1, 2, 3])))
+// Output: { _id: 'HashSet', values: [ '1', '3', '2' ] }
+```
+
+## HashMap
+
+### HashMap
+
+The `Schema.HashMap` function is useful for converting a `HashMap` into a JSON-serializable format.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.HashMap(options: {
+  key: Schema<KA, KI, KR>,
+  value: Schema<VA, VI, VR>
+})
+```
+
+| Input                              | Output                                                                                                                   |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `ReadonlyArray<readonly [KI, VI]>` | Converts to `HashMap<KA, VA>`, where `KI` is decoded into `KA` and `VI` is decoded into `VA` using the specified schemas |
+
+#### Encoding
+
+| Input             | Output                                                                                                                                    |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `HashMap<KA, VA>` | Converts to `ReadonlyArray<readonly [KI, VI]>`, where `KA` is encoded into `KI` and `VA` is encoded into `VI` using the specified schemas |
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+import { HashMap } from "effect"
+
+const schema = Schema.HashMap({
+  key: Schema.String,
+  value: Schema.NumberFromString
+})
+
+//     ┌─── readonly (readonly [string, string])[]
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── HashMap<string, number>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(
+  decode([
+    ["a", "2"],
+    ["b", "2"],
+    ["c", "3"]
+  ])
+)
+// Output: { _id: 'HashMap', values: [ [ 'a', 2 ], [ 'c', 3 ], [ 'b', 2 ] ] }
+
+// Encoding examples
+
+console.log(
+  encode(
+    HashMap.fromIterable([
+      ["a", 1],
+      ["b", 2],
+      ["c", 3]
+    ])
+  )
+)
+// Output: [ [ 'a', '1' ], [ 'c', '3' ], [ 'b', '2' ] ]
+```
+
+### HashMapFromSelf
+
+The `Schema.HashMapFromSelf` function is designed for scenarios where `HashMap` values are already in the `HashMap` format and need to be decoded or encoded while transforming the inner values according to the provided schemas.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.HashMapFromSelf(options: {
+  key: Schema<KA, KI, KR>,
+  value: Schema<VA, VI, VR>
+})
+```
+
+#### Decoding
+
+| Input             | Output                                                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `HashMap<KI, VI>` | Converts to `HashMap<KA, VA>`, where `KI` is decoded into `KA` and `VI` is decoded into `VA` using the specified schemas |
+
+#### Encoding
+
+| Input             | Output                                                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `HashMap<KA, VA>` | Converts to `HashMap<KI, VI>`, where `KA` is encoded into `KI` and `VA` is encoded into `VI` using the specified schemas |
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+import { HashMap } from "effect"
+
+const schema = Schema.HashMapFromSelf({
+  key: Schema.String,
+  value: Schema.NumberFromString
+})
+
+//     ┌─── HashMap<string, string>
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── HashMap<string, number>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(
+  decode(
+    HashMap.fromIterable([
+      ["a", "2"],
+      ["b", "2"],
+      ["c", "3"]
+    ])
+  )
+)
+// Output: { _id: 'HashMap', values: [ [ 'a', 2 ], [ 'c', 3 ], [ 'b', 2 ] ] }
+
+// Encoding examples
+
+console.log(
+  encode(
+    HashMap.fromIterable([
+      ["a", 1],
+      ["b", 2],
+      ["c", 3]
+    ])
+  )
+)
+// Output: { _id: 'HashMap', values: [ [ 'a', '1' ], [ 'c', '3' ], [ 'b', '2' ] ] }
+```
+
+## SortedSet
+
+### SortedSet
+
+The `Schema.SortedSet` function provides a way to map between `SortedSet` and an array representation, allowing for JSON serialization and deserialization.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.SortedSet(schema: Schema<A, I, R>, order: Order<A>)
+```
+
+#### Decoding
+
+| Input              | Output                                                                                                |
+| ------------------ | ----------------------------------------------------------------------------------------------------- |
+| `ReadonlyArray<I>` | Converts to `SortedSet<A>`, where each element in the array is decoded into type `A` using the schema |
+
+#### Encoding
+
+| Input          | Output                                                                                                          |
+| -------------- | --------------------------------------------------------------------------------------------------------------- |
+| `SortedSet<A>` | Converts to `ReadonlyArray<I>`, where each element in the `SortedSet` is encoded into type `I` using the schema |
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+import { Number, SortedSet } from "effect"
+
+const schema = Schema.SortedSet(Schema.NumberFromString, Number.Order)
+
+//     ┌─── readonly string[]
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── SortedSet<number>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(decode(["1", "2", "3"]))
+// Output: { _id: 'SortedSet', values: [ 1, 2, 3 ] }
+
+// Encoding examples
+
+console.log(encode(SortedSet.fromIterable(Number.Order)([1, 2, 3])))
+// Output: [ '1', '2', '3' ]
+```
+
+### SortedSetFromSelf
+
+The `Schema.SortedSetFromSelf` function is designed for scenarios where `SortedSet` values are already in the `SortedSet` format and need to be decoded or encoded while transforming the inner values according to the provided schema.
+
+**Syntax**
+
+```ts showLineNumbers=false
+Schema.SortedSetFromSelf(
+  schema: Schema<A, I, R>,
+  decodeOrder: Order<A>,
+  encodeOrder: Order<I>
+)
+```
+
+#### Decoding
+
+| Input          | Output                                                                                       |
+| -------------- | -------------------------------------------------------------------------------------------- |
+| `SortedSet<I>` | Converts to `SortedSet<A>`, decoding each element from type `I` to type `A` using the schema |
+
+#### Encoding
+
+| Input          | Output                                                                                       |
+| -------------- | -------------------------------------------------------------------------------------------- |
+| `SortedSet<A>` | Converts to `SortedSet<I>`, encoding each element from type `A` to type `I` using the schema |
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+import { Number, SortedSet, String } from "effect"
+
+const schema = Schema.SortedSetFromSelf(
+  Schema.NumberFromString,
+  Number.Order,
+  String.Order
+)
+
+//     ┌─── SortedSet<string>
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── SortedSet<number>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+const encode = Schema.encodeSync(schema)
+
+// Decoding examples
+
+console.log(decode(SortedSet.fromIterable(String.Order)(["1", "2", "3"])))
+// Output: { _id: 'SortedSet', values: [ 1, 2, 3 ] }
+
+// Encoding examples
+
+console.log(encode(SortedSet.fromIterable(Number.Order)([1, 2, 3])))
+// Output: { _id: 'SortedSet', values: [ '1', '2', '3' ] }
+```
+
+## Duration
+
+The `Duration` schema family enables the transformation and validation of duration values across various formats, including `hrtime`, milliseconds, and nanoseconds.
+
+### Duration
+
+Converts an hrtime(i.e. `[seconds: number, nanos: number]`) into a `Duration`.
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+
+const schema = Schema.Duration
+
+//     ┌─── readonly [seconds: number, nanos: number]
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── Duration
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+
+// Decoding examples
+
+console.log(decode([0, 0]))
+// Output: { _id: 'Duration', _tag: 'Millis', millis: 0 }
+
+console.log(decode([5000, 0]))
+// Output: { _id: 'Duration', _tag: 'Nanos', hrtime: [ 5000, 0 ] }
+```
+
+### DurationFromSelf
+
+The `DurationFromSelf` schema is designed to validate that a given value conforms to the `Duration` type.
+
+**Example**
+
+```ts twoslash
+import { Schema, Duration } from "effect"
+
+const schema = Schema.DurationFromSelf
+
+//     ┌─── Duration
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── Duration
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+
+// Decoding examples
+
+console.log(decode(Duration.seconds(2)))
+// Output: { _id: 'Duration', _tag: 'Millis', millis: 2000 }
+
+console.log(decode(null))
+/*
+throws:
+ParseError: Expected DurationFromSelf, actual null
+*/
+```
+
+### DurationFromMillis
+
+Converts a `number` into a `Duration` where the number represents the number of milliseconds.
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+
+const schema = Schema.DurationFromMillis
+
+//     ┌─── number
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── Duration
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+
+// Decoding examples
+
+console.log(decode(0))
+// Output: { _id: 'Duration', _tag: 'Millis', millis: 0 }
+
+console.log(decode(5000))
+// Output: { _id: 'Duration', _tag: 'Millis', millis: 5000 }
+```
+
+### DurationFromNanos
+
+Converts a `BigInt` into a `Duration` where the number represents the number of nanoseconds.
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+
+const schema = Schema.DurationFromNanos
+
+//     ┌─── bigint
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── Duration
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+
+// Decoding examples
+
+console.log(decode(0n))
+// Output: { _id: 'Duration', _tag: 'Millis', millis: 0 }
+
+console.log(decode(5000000000n))
+// Output: { _id: 'Duration', _tag: 'Nanos', hrtime: [ 5, 0 ] }
+```
+
+### clampDuration
+
+Clamps a `Duration` between a minimum and a maximum value.
+
+**Example**
+
+```ts twoslash
+import { Schema, Duration } from "effect"
+
+const schema = Schema.DurationFromSelf.pipe(
+  Schema.clampDuration("5 seconds", "10 seconds")
+)
+
+//     ┌─── Duration
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── Duration
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+
+// Decoding examples
+
+console.log(decode(Duration.decode("2 seconds")))
+// Output: { _id: 'Duration', _tag: 'Millis', millis: 5000 }
+
+console.log(decode(Duration.decode("6 seconds")))
+// Output: { _id: 'Duration', _tag: 'Millis', millis: 6000 }
+
+console.log(decode(Duration.decode("11 seconds")))
+// Output: { _id: 'Duration', _tag: 'Millis', millis: 10000 }
+```
+
+## Redacted
+
+### Redacted
+
+The `Schema.Redacted` function is specifically designed to handle sensitive information by converting a `string` into a [Redacted](/docs/data-types/redacted/) object.
+This transformation ensures that the sensitive data is not exposed in the application's output.
+
+**Example** (Basic Redacted Schema)
+
+```ts twoslash
+import { Schema } from "effect"
+
+const schema = Schema.Redacted(Schema.String)
+
+//     ┌─── string
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── Redacted<string>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+
+// Decoding examples
+
+console.log(decode("keep it secret, keep it safe"))
+// Output: <redacted>
+```
+
+It's important to note that when successfully decoding a `Redacted`, the output is intentionally obscured (`<redacted>`) to prevent the actual secret from being revealed in logs or console outputs.
+
+<Aside type="caution" title="Potential Risks">
+  When composing the `Redacted` schema with other schemas, care must be
+  taken as decoding or encoding errors could potentially expose sensitive
+  information.
+</Aside>
+
+**Example** (Exposure Risks During Errors)
+
+In the example below, if the input string does not meet the criteria (e.g., contains spaces), the error message generated might inadvertently expose sensitive information included in the input.
+
+```ts twoslash
+import { Schema } from "effect"
+import { Redacted } from "effect"
+
+const schema = Schema.Trimmed.pipe(
+  Schema.compose(Schema.Redacted(Schema.String))
+)
+
+console.log(Schema.decodeUnknownEither(schema)(" SECRET"))
+/*
+{
+  _id: 'Either',
+  _tag: 'Left',
+  left: {
+    _id: 'ParseError',
+    message: '(Trimmed <-> (string <-> Redacted(<redacted>)))\n' +
+      '└─ Encoded side transformation failure\n' +
+      '   └─ Trimmed\n' +
+      '      └─ Predicate refinement failure\n' +
+      '         └─ Expected Trimmed (a string with no leading or trailing whitespace), actual " SECRET"'
+  }
+}
+*/
+
+console.log(Schema.encodeEither(schema)(Redacted.make(" SECRET")))
+/*
+{
+  _id: 'Either',
+  _tag: 'Left',
+  left: {
+    _id: 'ParseError',
+    message: '(Trimmed <-> (string <-> Redacted(<redacted>)))\n' +
+      '└─ Encoded side transformation failure\n' +
+      '   └─ Trimmed\n' +
+      '      └─ Predicate refinement failure\n' +
+      '         └─ Expected Trimmed (a string with no leading or trailing whitespace), actual " SECRET"'
+  }
+}
+*/
+```
+
+#### Mitigating Exposure Risks
+
+To reduce the risk of sensitive information leakage in error messages, you can customize the error messages to obscure sensitive details:
+
+**Example** (Customizing Error Messages)
+
+```ts twoslash
+import { Schema } from "effect"
+import { Redacted } from "effect"
+
+const schema = Schema.Trimmed.annotations({
+  message: () => "Expected Trimmed, actual <redacted>"
+}).pipe(Schema.compose(Schema.Redacted(Schema.String)))
+
+console.log(Schema.decodeUnknownEither(schema)(" SECRET"))
+/*
+{
+  _id: 'Either',
+  _tag: 'Left',
+  left: {
+    _id: 'ParseError',
+    message: '(Trimmed <-> (string <-> Redacted(<redacted>)))\n' +
+      '└─ Encoded side transformation failure\n' +
+      '   └─ Expected Trimmed, actual <redacted>'
+  }
+}
+*/
+
+console.log(Schema.encodeEither(schema)(Redacted.make(" SECRET")))
+/*
+{
+  _id: 'Either',
+  _tag: 'Left',
+  left: {
+    _id: 'ParseError',
+    message: '(Trimmed <-> (string <-> Redacted(<redacted>)))\n' +
+      '└─ Encoded side transformation failure\n' +
+      '   └─ Expected Trimmed, actual <redacted>'
+  }
+}
+*/
+```
+
+### RedactedFromSelf
+
+The `Schema.RedactedFromSelf` schema is designed to validate that a given value conforms to the `Redacted` type from the `effect` library.
+
+**Example**
+
+```ts twoslash
+import { Schema } from "effect"
+import { Redacted } from "effect"
+
+const schema = Schema.RedactedFromSelf(Schema.String)
+
+//     ┌─── Redacted<string>
+//     ▼
+type Encoded = typeof schema.Encoded
+
+//     ┌─── Redacted<string>
+//     ▼
+type Type = typeof schema.Type
+
+const decode = Schema.decodeUnknownSync(schema)
+
+// Decoding examples
+
+console.log(decode(Redacted.make("mysecret")))
+// Output: <redacted>
+
+console.log(decode(null))
+/*
+throws:
+ParseError: Expected Redacted(<redacted>), actual null
+*/
+```
+
+It's important to note that when successfully decoding a `Redacted`, the output is intentionally obscured (`<redacted>`) to prevent the actual secret from being revealed in logs or console outputs.

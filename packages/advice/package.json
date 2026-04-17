@@ -1,0 +1,25 @@
+{
+  "name": "@zenbu/advice",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./runtime": "./src/runtime/index.ts",
+    "./transform": "./src/transform/index.ts",
+    "./vite": "./src/vite.ts",
+    "./node": "./src/node.ts",
+    "./node-loader": "./src/node-loader.ts"
+  },
+  "dependencies": {
+    "@babel/core": "^7.26.0",
+    "@babel/parser": "^7.26.0",
+    "@babel/traverse": "^7.26.0",
+    "@babel/types": "^7.26.0"
+  },
+  "devDependencies": {
+    "@types/babel__core": "^7.20.5",
+    "@types/babel__traverse": "^7.20.6",
+    "vite": "^6.3.0",
+    "vitest": "^3.1.1"
+  }
+}

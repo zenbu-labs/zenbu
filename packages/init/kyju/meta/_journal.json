@@ -1,0 +1,95 @@
+{
+  "version": "1",
+  "entries": [
+    {
+      "idx": 0,
+      "tag": "initial",
+      "when": 1776066211391
+    },
+    {
+      "idx": 1,
+      "tag": "add_modes",
+      "when": 1776120078133
+    },
+    {
+      "idx": 2,
+      "tag": "add_chat_blobs",
+      "when": 1776307200000
+    },
+    {
+      "idx": 3,
+      "tag": "add_context_files",
+      "when": 1776127571166
+    },
+    {
+      "idx": 4,
+      "tag": "agent_config_refactor",
+      "when": 1776196834150
+    },
+    {
+      "idx": 5,
+      "tag": "agent_config_optional_fields",
+      "when": 1776197735610
+    },
+    {
+      "idx": 6,
+      "tag": "add_process_state",
+      "when": 1776200150719
+    },
+    {
+      "idx": 7,
+      "tag": "add_default_model_thinking",
+      "when": 1776210000000
+    },
+    {
+      "idx": 8,
+      "tag": "add_panes_and_views",
+      "when": 1776220000000
+    },
+    {
+      "idx": 9,
+      "tag": "composer_drafts",
+      "when": 1776241942645
+    },
+    {
+      "idx": 10,
+      "tag": "add_agent_modes",
+      "when": 1776287342348
+    },
+    {
+      "idx": 11,
+      "tag": "add_sessions",
+      "when": 1776295908923
+    },
+    {
+      "idx": 12,
+      "tag": "add_window_states",
+      "when": 1776298042709
+    },
+    {
+      "idx": 13,
+      "tag": "nullable_ids",
+      "when": 1776299188695
+    },
+    {
+      "idx": 14,
+      "tag": "add_title_summarization",
+      "when": 1776327410621
+    },
+    {
+      "idx": 15,
+      "tag": "add_last_user_message_at",
+      "when": 1776329901623
+    },
+    {
+      "idx": 16,
+      "tag": "add_unread_indicator",
+      "when": 1776336918527
+    },
+    {
+      "idx": 17,
+      "tag": "add_agent_icon",
+      "when": 1776337090207
+    }
+  ]
+}
