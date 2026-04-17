@@ -63,6 +63,15 @@ jobs:
         working-directory: apps/kernel
         run: pnpm run build
 
+      # Swap apps/kernel/node_modules with a flat (hoisted) deploy so
+      # electron-builder's collector sees every transitive. The default
+      # isolated pnpm layout hides deep transitives (e.g. tsx →
+      # get-tsconfig → resolve-pkg-maps) and the bundle ships broken.
+      # See notes in apps/kernel/scripts/prep-flat-deploy.sh.
+      - name: Prep flat node_modules for electron-builder
+        shell: bash
+        run: bash apps/kernel/scripts/prep-flat-deploy.sh
+
       - name: Package & Publish (${{ matrix.target }})
         working-directory: apps/kernel
         shell: bash
