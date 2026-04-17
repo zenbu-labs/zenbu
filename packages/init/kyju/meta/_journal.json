@@ -105,6 +105,11 @@
       "idx": 20,
       "tag": "default_agents_bun",
       "when": 1776466127389
+    },
+    {
+      "idx": 21,
+      "tag": "default_config_claude",
+      "when": 1776468324937
     }
   ]
 }

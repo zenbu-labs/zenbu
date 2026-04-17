@@ -19,5 +19,6 @@ import m17 from "./0017_add_agent_icon"
 import m18 from "./0018_default_agents"
 import m19 from "./0019_remove_workspaces"
 import m20 from "./0020_default_agents_bun"
+import m21 from "./0021_default_config_claude"
 
-export const migrations = [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20]
+export const migrations = [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21]

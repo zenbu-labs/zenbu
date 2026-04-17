@@ -129,7 +129,7 @@ export const appSchema = createSchema({
       }),
     )
     .default([]),
-  selectedConfigId: f.string().default("codex"),
+  selectedConfigId: f.string().default("claude"),
   summarizationAgentConfigId: f.string().nullable().default(null),
   summarizationModel: f.string().nullable().default(null),
   acpSessions: f.record(zod.string(), zod.string()).default({}),
