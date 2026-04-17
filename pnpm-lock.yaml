@@ -56,6 +56,9 @@ importers:
       react-dom:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
+      resolve-pkg-maps:
+        specifier: ^1.0.0
+        version: 1.0.0
       tailwindcss:
         specifier: ^4
         version: 4.2.2
