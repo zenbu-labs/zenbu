@@ -22,7 +22,10 @@ const INTERNAL_DIR = path.join(os.homedir(), ".zenbu", ".internal")
 const PATHS_JSON = path.join(INTERNAL_DIR, "paths.json")
 
 function computePaths(): ZenbuPaths {
-  const cacheRoot = app.getPath("cache")
+  // app.getPath("cache") returns the user cache root (e.g. ~/Library/Caches
+  // on macOS), NOT app-namespaced. Append "Zenbu" ourselves so we get
+  // ~/Library/Caches/Zenbu which matches what setup.sh writes to.
+  const cacheRoot = path.join(app.getPath("cache"), "Zenbu")
   const binDir = path.join(cacheRoot, "bin")
   return {
     cacheRoot,

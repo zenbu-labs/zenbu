@@ -41,6 +41,9 @@ importers:
       esbuild:
         specifier: ^0.25.0
         version: 0.25.12
+      get-tsconfig:
+        specifier: ^4.10.0
+        version: 4.13.6
       ms:
         specifier: ^2.1.3
         version: 2.1.3
