@@ -3,13 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": {
-    "kyju": "./dist/bin.cjs"
-  },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.typetest.json",
-    "build": "tsx build.ts"
+    "typecheck": "tsc --noEmit -p tsconfig.typetest.json"
   },
   "main": "src/v2/index.ts",
   "exports": {
@@ -19,6 +15,7 @@
     "./schema": "./src/v2/db/schema.ts",
     "./migrations": "./src/v2/migrations.ts",
     "./config": "./src/cli/config.ts",
+    "./cli": "./src/cli/index.ts",
     "./transport": "./src/v2/transport.ts"
   },
   "dependencies": {

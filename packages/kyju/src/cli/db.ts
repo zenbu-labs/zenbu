@@ -361,12 +361,12 @@ const command = dbCommand.pipe(
   ]),
 );
 
-export function runDb() {
+export function runDb(argv: string[] = process.argv.slice(3)) {
   const cli = Command.run(command, {
     name: "kyju db",
     version: "0.0.0",
   });
   Effect.suspend(() =>
-    cli(["node", "kyju-db", ...process.argv.slice(3)]),
+    cli(["node", "kyju-db", ...argv]),
   ).pipe(Effect.provide(NodeContext.layer), NodeRuntime.runMain);
 }

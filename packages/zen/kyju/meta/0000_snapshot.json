@@ -1,0 +1,12 @@
+{
+  "id": "6ef5bd4d-c987-4c5d-adc9-576a0ef6b70b",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "fields": {
+    "appPath": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": "/Applications/Zenbu.app/Contents/MacOS/Zenbu"
+    }
+  }
+}

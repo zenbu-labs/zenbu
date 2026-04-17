@@ -4,9 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run",
-    "kyju": "node ../kyju/dist/bin.cjs",
-    "kyju:generate": "node ../kyju/dist/bin.cjs generate"
+    "test": "vitest run"
   },
   "dependencies": {
     "@effect/platform": "^0.94.5",

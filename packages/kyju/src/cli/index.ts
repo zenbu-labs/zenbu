@@ -118,10 +118,13 @@ function runGenerate(opts: { config?: string; name?: string; custom: boolean; am
   }
 }
 
-if (process.argv[2] === "db") {
-  runDb();
-} else {
-  const args = parseArgs(process.argv.slice(2));
+export function run(argv: string[]) {
+  if (argv[0] === "db") {
+    runDb(argv.slice(1));
+    return;
+  }
+
+  const args = parseArgs(argv);
 
   if (args.help || !args.command) {
     printUsage();
@@ -135,4 +138,11 @@ if (process.argv[2] === "db") {
     printUsage();
     process.exit(1);
   }
+}
+
+// Auto-run when invoked as the entry point (bun packages/kyju/src/cli/index.ts).
+// Safe to import; nothing runs on import.
+// Bun populates import.meta.main; Node 22+ supports it too.
+if ((import.meta as any).main) {
+  run(process.argv.slice(2));
 }
