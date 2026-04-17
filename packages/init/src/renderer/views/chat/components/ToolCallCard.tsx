@@ -149,8 +149,15 @@ function BashCard({ title, rawInput, toolResponse, status }: {
 }) {
   const [expanded, setExpanded] = useState(false)
   const input = rawInput as Record<string, any> | null
-  const command = input?.command ?? title
+  const command = typeof input?.command === "string" && input.command.length > 0 ? input.command : null
   const bashStatus = status === "failed" ? "completed" : status
+  const loading = isLoading(bashStatus)
+
+  const inner = command ? (
+    <span className="text-neutral-700">{command}</span>
+  ) : (
+    <span className={`inline-block align-middle w-24 h-3.5 rounded-sm bg-[length:200%_100%] bg-gradient-to-r from-neutral-200 via-neutral-100 to-neutral-200 mx-0.5${loading ? " text-shimmer" : ""}`} />
+  )
 
   return (
     <div>
@@ -159,9 +166,9 @@ function BashCard({ title, rawInput, toolResponse, status }: {
         className="group/tool flex items-center gap-1.5 py-0.5 text-sm w-full text-left cursor-pointer min-w-0"
       >
         {expanded ? (
-          <span className="break-all min-w-0"><span className={isLoading(bashStatus) ? shimmer : "text-neutral-500"}>Bash(</span><span className={isLoading(bashStatus) ? shimmer : "text-neutral-700"}>{command}</span><span className={isLoading(bashStatus) ? shimmer : "text-neutral-500"}>)</span></span>
+          <span className="break-all min-w-0"><span className={loading ? shimmer : "text-neutral-500"}>Bash(</span>{inner}<span className={loading ? shimmer : "text-neutral-500"}>)</span></span>
         ) : (
-          <span className="truncate min-w-0"><span className={isLoading(bashStatus) ? shimmer : "text-neutral-500"}>Bash(</span><span className={isLoading(bashStatus) ? shimmer : "text-neutral-700"}>{command}</span><span className={isLoading(bashStatus) ? shimmer : "text-neutral-500"}>)</span></span>
+          <span className="truncate min-w-0"><span className={loading ? shimmer : "text-neutral-500"}>Bash(</span>{inner}<span className={loading ? shimmer : "text-neutral-500"}>)</span></span>
         )}
         <Chevron expanded={expanded} />
       </button>

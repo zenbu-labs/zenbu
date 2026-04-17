@@ -113,6 +113,46 @@ export class WindowService extends Service {
     return { windowId, agentId };
   }
 
+  async createWindowWithLastOrNewAgent() {
+    const { baseWindow, db } = this.ctx;
+    const client = db.client;
+    const kernel = client.readRoot().plugin.kernel;
+    const agents = kernel.agents ?? [];
+    const lastAgent = [...agents]
+      .filter((a) => a.lastUserMessageAt != null)
+      .sort(
+        (a, b) => (b.lastUserMessageAt ?? 0) - (a.lastUserMessageAt ?? 0),
+      )[0];
+
+    if (!lastAgent) return this.createWindowWithAgent();
+
+    const windowId = nanoid();
+    const sessionId = nanoid();
+    await Effect.runPromise(
+      client.update((root) => {
+        root.plugin.kernel.windowStates = [
+          ...(root.plugin.kernel.windowStates ?? []),
+          {
+            id: windowId,
+            sessions: [
+              { id: sessionId, agentId: lastAgent.id, lastViewedAt: null },
+            ],
+            panes: [],
+            rootPaneId: null,
+            focusedPaneId: null,
+            sidebarOpen: false,
+            tabSidebarOpen: true,
+            sidebarPanel: "overview",
+          },
+        ];
+      }),
+    );
+
+    baseWindow.createWindow({ windowId });
+    this._mountNewWindows?.();
+    return { windowId, agentId: lastAgent.id };
+  }
+
   private getFocusedWebContents(): Electron.WebContents | undefined {
     for (const { win, view } of this.views.values()) {
       if (win.isFocused()) return view.webContents;
@@ -895,7 +935,7 @@ export class WindowService extends Service {
     this.effect("activate", () => {
       const handler = () => {
         if (baseWindow.windows.size === 0) {
-          this.createWindowWithAgent();
+          this.createWindowWithLastOrNewAgent();
         }
       };
       app.on("activate", handler);

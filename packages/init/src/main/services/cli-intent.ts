@@ -45,12 +45,31 @@ export class CliIntentService extends Service {
   evaluate() {
     if (this._processed) return;
 
-    const { agent, agentId: existingAgentId, cwd } = parseZenArgs(process.argv);
-    if (!agent && !existingAgentId && !cwd) return;
+    const { agent, agentId: explicitAgentId, cwd } = parseZenArgs(process.argv);
 
     this._processed = true;
 
     const client = this.ctx.db.client;
+
+    // When nothing was passed on the CLI (spotlight/dock open), fall back to
+    // the last agent the user interacted with. If none exists, create a fresh
+    // agent from the selected config — same behavior as `zen` with no args.
+    let existingAgentId = explicitAgentId;
+    let fallbackToNewAgent = false;
+    if (!agent && !existingAgentId && !cwd) {
+      const kernel = client.readRoot().plugin.kernel;
+      const agents = kernel.agents ?? [];
+      const lastAgent = [...agents]
+        .filter((a) => a.lastUserMessageAt != null)
+        .sort(
+          (a, b) => (b.lastUserMessageAt ?? 0) - (a.lastUserMessageAt ?? 0),
+        )[0];
+      if (lastAgent) {
+        existingAgentId = lastAgent.id;
+      } else {
+        fallbackToNewAgent = true;
+      }
+    }
 
     Effect.runPromise(
       client.update((root) => {
@@ -100,18 +119,26 @@ export class CliIntentService extends Service {
               sidebarPanel: "overview",
             },
           ];
-        } else if (agent) {
+        } else if (agent || fallbackToNewAgent) {
           const configs = kernel.agentConfigs ?? [];
-          const matched = matchAgentConfig(configs, agent);
+          const matched = agent
+            ? matchAgentConfig(configs, agent)
+            : configs.find((c) => c.id === kernel.selectedConfigId) ?? configs[0];
           if (!matched) {
-            const names = configs.map((c) => c.name).join(", ");
-            console.warn(
-              `[cli-intent] No agent config matching "${agent}". Available: ${names || "(none)"}`,
-            );
+            if (agent) {
+              const names = configs.map((c) => c.name).join(", ");
+              console.warn(
+                `[cli-intent] No agent config matching "${agent}". Available: ${names || "(none)"}`,
+              );
+            } else {
+              console.warn(
+                `[cli-intent] No agent configs available; cannot create a default agent.`,
+              );
+            }
             return;
           }
 
-          kernel.selectedConfigId = matched.id;
+          if (agent) kernel.selectedConfigId = matched.id;
 
           const agentId = nanoid();
           const sessionId = nanoid();
@@ -157,7 +184,7 @@ export class CliIntentService extends Service {
     });
 
     console.log(
-      `[cli-intent] applied${agent ? ` agent=${agent}` : ""}${existingAgentId ? ` agentId=${existingAgentId}` : ""}${cwd ? ` cwd=${cwd}` : ""}`,
+      `[cli-intent] applied${agent ? ` agent=${agent}` : ""}${existingAgentId ? ` agentId=${existingAgentId}` : ""}${cwd ? ` cwd=${cwd}` : ""}${fallbackToNewAgent ? " (fallback: new agent)" : ""}`,
     );
   }
 }

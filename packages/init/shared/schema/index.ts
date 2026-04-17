@@ -97,7 +97,26 @@ export const appSchema = createSchema({
         iconBlobId: zod.string().optional(),
       }),
     )
-    .default([]),
+    .default([
+      {
+        id: "codex",
+        name: "codex",
+        startCommand:
+          "{HOME}/.zenbu/plugins/zenbu/packages/init/node_modules/.bin/tsx {HOME}/.zenbu/plugins/zenbu/packages/codex-acp/src/index.ts",
+        availableModels: [],
+        availableThinkingLevels: [],
+        availableModes: [],
+      },
+      {
+        id: "claude",
+        name: "claude",
+        startCommand:
+          "{HOME}/.zenbu/plugins/zenbu/packages/init/node_modules/.bin/tsx {HOME}/.zenbu/plugins/zenbu/packages/claude-acp/src/index.ts",
+        availableModels: [],
+        availableThinkingLevels: [],
+        availableModes: [],
+      },
+    ]),
   agents: f
     .array(
       zod.object({
@@ -124,7 +143,7 @@ export const appSchema = createSchema({
       }),
     )
     .default([]),
-  selectedConfigId: f.string().default("codex-acp"),
+  selectedConfigId: f.string().default("codex"),
   summarizationAgentConfigId: f.string().nullable().default(null),
   summarizationModel: f.string().nullable().default(null),
   acpSessions: f.record(zod.string(), zod.string()).default({}),

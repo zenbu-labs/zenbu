@@ -332,21 +332,22 @@ export function materializeMessages(
             if ((existing.toolName || metaToolName).toLowerCase() === "write") existing.kind = "create";
           }
           if (newItems.length > 0) {
-            const existingDiffKeys = new Set(
-              existing.contentItems
+            // Edit emits a diff twice for the same path: once in `tool_call`
+            // (from input old/new strings) and once in `tool_call_update`
+            // (from structuredPatch, which includes surrounding context).
+            // When an update supplies diffs for a path, replace any prior
+            // diffs for that path so only the latest rendering survives.
+            const newDiffPaths = new Set(
+              newItems
                 .filter((c): c is ToolCallContentItem & { type: "diff" } => c.type === "diff")
-                .map((c) => `${c.path}\u0000${c.oldText ?? ""}\u0000${c.newText}`),
+                .map((c) => c.path),
             );
-            const deduped = newItems.filter((item) => {
-              if (item.type !== "diff") return true;
-              const key = `${item.path}\u0000${item.oldText ?? ""}\u0000${item.newText}`;
-              if (existingDiffKeys.has(key)) return false;
-              existingDiffKeys.add(key);
-              return true;
-            });
-            if (deduped.length > 0) {
-              existing.contentItems = [...existing.contentItems, ...deduped];
-            }
+            const retained = newDiffPaths.size > 0
+              ? existing.contentItems.filter(
+                  (c) => !(c.type === "diff" && newDiffPaths.has(c.path)),
+                )
+              : existing.contentItems;
+            existing.contentItems = [...retained, ...newItems];
           }
           if (rawOut !== undefined) existing.rawOutput = rawOut;
           if (rawIn !== undefined) existing.rawInput = rawIn;

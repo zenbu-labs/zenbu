@@ -19,6 +19,9 @@ type EffectSectionProxy<S> = {
 export type SectionedEffectClient = {
   readRoot(): DbRoot;
   update(fn: (root: DbRoot) => void | DbRoot): Effect.Effect<void, KyjuError>;
+  createBlob(data: Uint8Array, hot?: boolean): Effect.Effect<string, KyjuError>;
+  deleteBlob(blobId: string): Effect.Effect<void, KyjuError>;
+  getBlobData(blobId: string): Effect.Effect<Uint8Array | null, KyjuError>;
   plugin: {
     [K in keyof DbRoot["plugin"]]: EffectSectionProxy<DbRoot["plugin"][K]>;
   };

@@ -90,6 +90,11 @@
       "idx": 17,
       "tag": "add_agent_icon",
       "when": 1776337090207
+    },
+    {
+      "idx": 18,
+      "tag": "default_agents",
+      "when": 1776463097185
     }
   ]
 }

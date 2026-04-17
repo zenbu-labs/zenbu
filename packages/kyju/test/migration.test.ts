@@ -571,6 +571,76 @@ describe("applyOperations (unit)", () => {
     expect(result.tags).toEqual(["default"]);
   });
 
+  it("alter with default change applies when prior migration enriched array items with new fields", () => {
+    // Simulates: initial default was [{id:"a", name:"A"}]; an intermediate
+    // migration enriched each entry with `newField`; now we bump the default
+    // to []. Strict equality would see the enriched value as "user data" and
+    // skip the bump, leaving the stale entry forever. Subset match detects
+    // enrichment and applies the new default.
+    const data = {
+      configs: [
+        { id: "a", name: "A", newField: "enriched" },
+      ],
+    };
+    const result = applyOperations(data, [
+      {
+        op: "alter",
+        key: "configs",
+        changes: {
+          default: {
+            from: [{ id: "a", name: "A" }],
+            to: [],
+          },
+        },
+      },
+    ]);
+    expect(result.configs).toEqual([]);
+  });
+
+  it("alter with default change preserves user data when array length differs from old default", () => {
+    const data = {
+      configs: [
+        { id: "a", name: "A" },
+        { id: "user-added", name: "Mine" },
+      ],
+    };
+    const result = applyOperations(data, [
+      {
+        op: "alter",
+        key: "configs",
+        changes: {
+          default: {
+            from: [{ id: "a", name: "A" }],
+            to: [],
+          },
+        },
+      },
+    ]);
+    expect(result.configs).toEqual([
+      { id: "a", name: "A" },
+      { id: "user-added", name: "Mine" },
+    ]);
+  });
+
+  it("alter with default change preserves user data when an array item has a mismatching required field", () => {
+    const data = {
+      configs: [{ id: "user-different", name: "A" }],
+    };
+    const result = applyOperations(data, [
+      {
+        op: "alter",
+        key: "configs",
+        changes: {
+          default: {
+            from: [{ id: "a", name: "A" }],
+            to: [],
+          },
+        },
+      },
+    ]);
+    expect(result.configs).toEqual([{ id: "user-different", name: "A" }]);
+  });
+
   it("alter with only typeHash change (no default change) is still a no-op", () => {
     const data = { count: 42 };
     const result = applyOperations(data, [
@@ -698,6 +768,76 @@ describe("migration plugin (default-only alter via runtime)", () => {
     const client = createClient<InferSchema<typeof nextSchema>>(replica);
 
     expect(client.mode.read()).toBe("user-custom-mode");
+  });
+
+  it("alter op with default change applies after an intermediate migration enriched array items", async () => {
+    // Regression: in the real init schema, migration A enriched each
+    // agentConfigs entry with new fields, then migration B tried to bump the
+    // default from the un-enriched shape to []. Strict equality fails to
+    // match (enriched > original), so B was silently skipped and fresh
+    // users kept the stale seed forever. Fixed via isDefaultSubsetMatch.
+    const dbPath = tmpDbPath();
+    cleanupPath = dbPath;
+
+    const initialSchema = createSchema({
+      configs: f
+        .array(zod.object({ id: zod.string(), name: zod.string() }))
+        .default([{ id: "legacy", name: "Legacy" }]),
+    });
+
+    await createDb({
+      path: dbPath,
+      schema: initialSchema,
+      migrations: [],
+      send: () => {},
+    });
+
+    const nextSchema = createSchema({
+      configs: f
+        .array(
+          zod.object({
+            id: zod.string(),
+            name: zod.string(),
+            extra: zod.string().optional(),
+          }),
+        )
+        .default([]),
+    });
+
+    const migrations: KyjuMigration[] = [
+      {
+        version: 1,
+        migrate(prev) {
+          return {
+            ...prev,
+            configs: (prev.configs ?? []).map((c: { id: string; name: string }) => ({
+              ...c,
+              extra: "enriched",
+            })),
+          };
+        },
+      },
+      {
+        version: 2,
+        operations: [
+          {
+            op: "alter",
+            key: "configs",
+            changes: {
+              default: {
+                from: [{ id: "legacy", name: "Legacy" }],
+                to: [],
+              },
+            },
+          },
+        ],
+      },
+    ];
+
+    const { replica } = await openDb(dbPath, nextSchema, migrations);
+    const client = createClient<InferSchema<typeof nextSchema>>(replica);
+
+    expect(client.configs.read()).toEqual([]);
   });
 });
 

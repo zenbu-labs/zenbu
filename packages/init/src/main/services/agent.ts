@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
 import { Agent } from "@zenbu/agent/src/agent";
@@ -18,7 +19,8 @@ function parseStartCommand(startCommand: string): {
   command: string;
   args: string[];
 } {
-  const parts = startCommand.split(/\s+/);
+  const expanded = startCommand.replace(/\{HOME\}/g, os.homedir());
+  const parts = expanded.split(/\s+/);
   return { command: parts[0], args: parts.slice(1) };
 }
 
@@ -120,10 +122,20 @@ export class AgentService extends Service {
 
   private getWorkspaceCwd(): string {
     const kernel = this.ctx.db.client.readRoot().plugin.kernel;
+    /**
+     * we should rethink the concept of workspaces
+     * 
+     * in my head anytime u select a cwd that should be a workspace
+     * but that doesn't make sense, and for the default 
+     * configuration there is no concept of workspaces
+     * this should be deleted and moved to plugin storage
+     */
     const ws = (kernel.workspaces ?? []).find(
       (w) => w.id === kernel.activeWorkspaceId,
     );
-    return ws?.cwd ?? process.cwd();
+    // No workspace context (e.g. spotlight/dock launch): default to ~/.zenbu
+    // so the user can start modifying the app itself without first picking a cwd.
+    return ws?.cwd ?? path.join(os.homedir(), ".zenbu");
   }
 
   private async ensureProcess(agentId: string): Promise<Agent> {

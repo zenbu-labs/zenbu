@@ -16,5 +16,6 @@ import m14 from "./0014_add_title_summarization"
 import m15 from "./0015_add_last_user_message_at"
 import m16 from "./0016_add_unread_indicator"
 import m17 from "./0017_add_agent_icon"
+import m18 from "./0018_default_agents"
 
-export const migrations = [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17]
+export const migrations = [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18]

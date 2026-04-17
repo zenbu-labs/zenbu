@@ -30,6 +30,43 @@ function stableStringify(value: any): string {
   return "{" + keys.map((k) => JSON.stringify(k) + ":" + stableStringify(value[k])).join(",") + "}";
 }
 
+/**
+ * Returns true if `current` is "structurally equivalent" to `oldDefault`,
+ * tolerating extra keys on objects that `oldDefault` didn't know about.
+ *
+ * Why this exists: when an alter op carries a `default` change, apply()
+ * uses this to decide whether the current DB value is "still the stale
+ * default" and therefore safe to overwrite with the new one. Strict
+ * equality would skip the overwrite whenever an intermediate migration
+ * (via a custom `migrate()`) enriched entries with new schema fields —
+ * which is common. That bug left users stuck on old defaults indefinitely.
+ *
+ * For objects: every key in `oldDefault` must be present and match in
+ * `current`; `current` is allowed to have *additional* keys (enrichment
+ * artifacts). For arrays: same length + elementwise subset match. For
+ * primitives: strict equality.
+ */
+function isDefaultSubsetMatch(current: any, oldDefault: any): boolean {
+  if (oldDefault === null || oldDefault === undefined) {
+    return current === oldDefault;
+  }
+  if (typeof oldDefault !== "object") {
+    return current === oldDefault;
+  }
+  if (Array.isArray(oldDefault)) {
+    if (!Array.isArray(current) || current.length !== oldDefault.length) return false;
+    return oldDefault.every((item, i) => isDefaultSubsetMatch(current[i], item));
+  }
+  if (typeof current !== "object" || current === null || Array.isArray(current)) {
+    return false;
+  }
+  for (const key of Object.keys(oldDefault)) {
+    if (!(key in current)) return false;
+    if (!isDefaultSubsetMatch(current[key], oldDefault[key])) return false;
+  }
+  return true;
+}
+
 export function applyOperations(
   data: Record<string, any>,
   ops: MigrationOp[],
@@ -64,7 +101,7 @@ export function applyOperations(
         if (op.changes.default) {
           const current = result[op.key];
           const oldDefault = op.changes.default.from;
-          if (stableStringify(current) === stableStringify(oldDefault)) {
+          if (isDefaultSubsetMatch(current, oldDefault)) {
             result[op.key] = op.changes.default.to;
           }
         }
