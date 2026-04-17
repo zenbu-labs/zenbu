@@ -23,6 +23,7 @@ export type MessageListHandle = {
   exportMeasurementCache: () => Record<string, any>
   isLockedToBottom: boolean
   getScrollMetrics: () => ScrollMetrics | null
+  markBottomRevealIntent: (source: string) => void
   scrollTo: (scrollTop: number) => void
   getScrollElement: () => HTMLDivElement | null
   forceScrollToBottom: () => void
@@ -104,6 +105,22 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
     const [showScrollToBottom, setShowScrollToBottom] = useState(false)
     const clickedScrollToBottomRef = useRef(false)
     const lastInvariantCommitKeyRef = useRef<string | null>(null)
+    const bottomRevealIntentRef = useRef<{
+      requestedAt: number
+      source: string
+      expectedTimestamp: number | null
+    } | null>(null)
+    const [bottomRevealIntentSeq, setBottomRevealIntentSeq] = useState(0)
+
+    const markBottomRevealIntent = useCallback((source: string) => {
+      bottomRevealIntentRef.current = {
+        requestedAt: Date.now(),
+        source,
+        expectedTimestamp:
+          debugExpectedVisibleMessageRef?.current?.timestamp ?? null,
+      }
+      setBottomRevealIntentSeq((seq) => seq + 1)
+    }, [debugExpectedVisibleMessageRef])
 
     const emitScrollMetrics = useCallback(() => {
       const el = autoScroll.getScrollElement()
@@ -315,6 +332,105 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
     ])
 
     useLayoutEffect(() => {
+      const intent = bottomRevealIntentRef.current
+      if (!intent) return
+
+      let raf1 = 0
+      let raf2 = 0
+
+      const inspect = () => {
+        const currentIntent = bottomRevealIntentRef.current
+        if (!currentIntent || currentIntent.requestedAt !== intent.requestedAt) return
+
+        const el = autoScroll.getScrollElement()
+        if (!el) return
+
+        const metrics = readChatScrollMetrics(el)
+        const distanceFromBottom = metrics?.distanceFromBottom ?? null
+        const expectedRendered = intent.expectedTimestamp !== null
+          ? messages.some(
+              (message) =>
+                message.role === "user" &&
+                message.timeSent === intent.expectedTimestamp,
+            )
+          : null
+        const lastMessage = messages[messages.length - 1]
+        const details = {
+          source: intent.source,
+          requestedAt: intent.requestedAt,
+          expectedTimestamp: intent.expectedTimestamp,
+          expectedRendered,
+          messageCount: messages.length,
+          loading,
+          hasMoreAbove: !!hasMoreAbove,
+          hasMoreBelow: !!hasMoreBelow,
+          scrollMetrics: metrics,
+          userScrolled: autoScroll.userScrolled,
+          autoScroll: autoScroll.getDebugState?.() ?? null,
+          lastMessage: summarizeMessage(lastMessage),
+          expectedVisibleMessage: debugExpectedVisibleMessageRef?.current ?? null,
+        }
+
+        if (autoScroll.userScrolled) {
+          reportChatInvariant(
+            "EXPLICIT_BOTTOM_REQUEST_LEFT_AUTOSCROLL_DETACHED",
+            details,
+            `bottom-request-detached:${intent.source}:${intent.requestedAt}`,
+          )
+        } else if (
+          hasMoreBelow &&
+          distanceFromBottom !== null &&
+          distanceFromBottom <= LOAD_NEWER_THRESHOLD
+        ) {
+          reportChatInvariant(
+            "EXPLICIT_BOTTOM_REQUEST_STILL_HAS_HIDDEN_TAIL",
+            details,
+            `bottom-request-hidden-tail:${intent.source}:${intent.requestedAt}`,
+          )
+        } else if (intent.expectedTimestamp !== null && expectedRendered === false) {
+          reportChatInvariant(
+            "EXPLICIT_BOTTOM_REQUEST_DID_NOT_REVEAL_EXPECTED_SUBMIT",
+            details,
+            `bottom-request-missing-submit:${intent.source}:${intent.requestedAt}`,
+          )
+        } else if (
+          intent.expectedTimestamp !== null &&
+          distanceFromBottom !== null &&
+          distanceFromBottom > INVARIANT_BOTTOM_DRIFT_THRESHOLD
+        ) {
+          reportChatInvariant(
+            "EXPLICIT_BOTTOM_REQUEST_REACHED_WRONG_VIEWPORT",
+            details,
+            `bottom-request-wrong-viewport:${intent.source}:${intent.requestedAt}`,
+          )
+        }
+
+        if (
+          bottomRevealIntentRef.current?.requestedAt === intent.requestedAt
+        ) {
+          bottomRevealIntentRef.current = null
+        }
+      }
+
+      raf1 = requestAnimationFrame(() => {
+        raf2 = requestAnimationFrame(inspect)
+      })
+
+      return () => {
+        if (raf1) cancelAnimationFrame(raf1)
+        if (raf2) cancelAnimationFrame(raf2)
+      }
+    }, [
+      autoScroll,
+      bottomRevealIntentSeq,
+      debugExpectedVisibleMessageRef,
+      hasMoreAbove,
+      hasMoreBelow,
+      loading,
+      messages,
+    ])
+
+    useLayoutEffect(() => {
       if (initialScrollDoneRef.current) return
       if (messages.length === 0) return
       const el = autoScroll.getScrollElement()
@@ -342,13 +458,14 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
         if (!el) return null
         return { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight, clientWidth: el.clientWidth }
       },
+      markBottomRevealIntent,
       scrollTo: (scrollTop: number) => {
         const el = autoScroll.getScrollElement()
         if (el) el.scrollTop = scrollTop
       },
       getScrollElement: () => autoScroll.getScrollElement(),
       forceScrollToBottom: () => autoScroll.forceScrollToBottom(),
-    }), [autoScroll])
+    }), [autoScroll, markBottomRevealIntent])
 
     const isEmpty = messages.length === 0 && !loading
 
@@ -409,6 +526,8 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
           onClick={() => {
             clickedScrollToBottomRef.current = true
             setShowScrollToBottom(false)
+            markBottomRevealIntent("scroll-button")
+            onReachedBottom?.()
             autoScroll.forceScrollToBottom()
           }}
           className={`absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center justify-center size-8 rounded-lg border border-neutral-300 bg-white text-neutral-500 shadow-md hover:bg-neutral-50 hover:text-neutral-700 cursor-pointer ${showScrollToBottom ? "opacity-100 translate-y-0 scale-100 transition-all duration-200 ease-out" : `opacity-0 translate-y-2 scale-90 pointer-events-none ${clickedScrollToBottomRef.current ? "duration-0" : "transition-all duration-200 ease-out"}`}`}

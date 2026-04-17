@@ -5,6 +5,7 @@ import {
   WebContentsView,
   Menu,
   app,
+  clipboard,
   dialog,
   globalShortcut,
   shell,
@@ -582,6 +583,10 @@ export class WindowService extends Service {
 
   async openExternal(url: string) {
     await shell.openExternal(url);
+  }
+
+  async copyToClipboard(text: string) {
+    clipboard.writeText(text);
   }
 
   async confirm(opts: {

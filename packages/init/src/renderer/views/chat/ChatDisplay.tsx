@@ -52,6 +52,7 @@ export function ChatDisplay({
 
   if (scrollToBottomRef) {
     scrollToBottomRef.current = () => {
+      listRef.current?.markBottomRevealIntent("composer-scroll");
       resumeTail();
       listRef.current?.forceScrollToBottom();
     };

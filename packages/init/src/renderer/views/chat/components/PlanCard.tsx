@@ -1,72 +1,76 @@
 import type { PlanEntry } from "../lib/materialize"
 
-function PlanStatusIcon({ status }: { status: string }) {
+function PlanCheckbox({ status }: { status: string }) {
   if (status === "in_progress") {
     return (
-      <span className="h-3 w-3 shrink-0 rounded-full border-[1.5px] border-neutral-300 border-t-neutral-500 animate-spin-slow" />
+      <span className="relative h-3.5 w-3.5 shrink-0 rounded-[3px] border border-neutral-400">
+        <span className="absolute inset-0 rounded-[3px] border border-transparent border-t-neutral-700 animate-spin-slow" />
+      </span>
     )
   }
   if (status === "completed") {
     return (
-      <svg
-        className="h-3.5 w-3.5 text-neutral-500 shrink-0"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        strokeWidth={2.5}
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M5 13l4 4L19 7"
-        />
-      </svg>
+      <span className="h-3.5 w-3.5 shrink-0 rounded-[3px] bg-neutral-700 flex items-center justify-center">
+        <svg
+          className="h-2.5 w-2.5 text-white"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={3.5}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+      </span>
     )
   }
   if (status === "failed") {
     return (
-      <svg
-        className="h-3.5 w-3.5 text-red-500 shrink-0"
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        strokeWidth={2.5}
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M6 18L18 6M6 6l12 12"
-        />
-      </svg>
+      <span className="h-3.5 w-3.5 shrink-0 rounded-[3px] border border-red-400 flex items-center justify-center">
+        <svg
+          className="h-2.5 w-2.5 text-red-500"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={3.5}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </span>
     )
   }
-  return <span className="h-1.5 w-1.5 rounded-full bg-neutral-400 shrink-0 mx-[3.5px]" />
+  return <span className="h-3.5 w-3.5 shrink-0 rounded-[3px] border border-neutral-300" />
 }
 
 export function PlanCard({ entries }: { entries: PlanEntry[] }) {
   return (
-    <div className="w-full rounded border border-neutral-300 px-3 py-2.5">
-      <div className="font-medium uppercase tracking-wider text-neutral-500 mb-2">
+    <div className="w-full">
+      <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-neutral-400 mb-1.5">
         Plan
       </div>
-      <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col">
         {entries.map((entry, i) => (
-          <div key={i} className="flex items-start gap-2">
-            <div className="mt-0.5">
-              <PlanStatusIcon status={entry.status} />
-            </div>
+          <label
+            key={i}
+            className="flex items-start gap-2.5 py-1 cursor-default"
+          >
+            <span className="mt-[3px]">
+              <PlanCheckbox status={entry.status} />
+            </span>
             <span
               className={
-                entry.status === "completed"
-                  ? "text-neutral-500 line-through"
+                "text-[13px] leading-[1.45] " +
+                (entry.status === "completed"
+                  ? "text-neutral-400 line-through"
                   : entry.status === "in_progress"
-                    ? "text-neutral-800 font-medium"
-                    : "text-neutral-500"
+                    ? "text-neutral-900 font-medium"
+                    : entry.status === "failed"
+                      ? "text-red-600"
+                      : "text-neutral-700")
               }
             >
               {entry.content}
             </span>
-          </div>
+          </label>
         ))}
       </div>
     </div>

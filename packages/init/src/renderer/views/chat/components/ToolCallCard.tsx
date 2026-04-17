@@ -159,9 +159,9 @@ function BashCard({ title, rawInput, toolResponse, status }: {
         className="group/tool flex items-center gap-1.5 py-0.5 text-sm w-full text-left cursor-pointer min-w-0"
       >
         {expanded ? (
-          <span className="break-all min-w-0"><span className={isLoading(bashStatus) ? shimmer : "text-neutral-500"}>Bash(</span><span className="text-neutral-700">{command}</span><span className={isLoading(bashStatus) ? shimmer : "text-neutral-500"}>)</span></span>
+          <span className="break-all min-w-0"><span className={isLoading(bashStatus) ? shimmer : "text-neutral-500"}>Bash(</span><span className={isLoading(bashStatus) ? shimmer : "text-neutral-700"}>{command}</span><span className={isLoading(bashStatus) ? shimmer : "text-neutral-500"}>)</span></span>
         ) : (
-          <span className="truncate min-w-0"><span className={isLoading(bashStatus) ? shimmer : "text-neutral-500"}>Bash(</span><span className="text-neutral-700">{command}</span><span className={isLoading(bashStatus) ? shimmer : "text-neutral-500"}>)</span></span>
+          <span className="truncate min-w-0"><span className={isLoading(bashStatus) ? shimmer : "text-neutral-500"}>Bash(</span><span className={isLoading(bashStatus) ? shimmer : "text-neutral-700"}>{command}</span><span className={isLoading(bashStatus) ? shimmer : "text-neutral-500"}>)</span></span>
         )}
         <Chevron expanded={expanded} />
       </button>

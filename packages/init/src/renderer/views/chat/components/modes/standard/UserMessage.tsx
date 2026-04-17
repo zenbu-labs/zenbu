@@ -5,6 +5,7 @@ import { ContentEditable } from "@lexical/react/LexicalContentEditable"
 import type { UserMessageProps } from "../../../lib/chat-components"
 import { ImageNode } from "../../../lib/ImageNode"
 import { $deserializeUserMessage } from "../../../lib/deserialize"
+import { useRpc } from "../../../../../lib/providers"
 
 const MINIMAP = new URLSearchParams(window.location.search).get("minimap") === "true"
 const BUBBLE_BG = "rgb(255, 255, 255)"
@@ -57,6 +58,7 @@ export function UserMessage({ content, images }: UserMessageProps) {
   const [overflows, setOverflows] = useState(false)
   const [copied, setCopied] = useState(false)
   const innerRef = useRef<HTMLDivElement>(null)
+  const rpc = useRpc()
 
   const hasImages = images && images.length > 0
 
@@ -67,10 +69,10 @@ export function UserMessage({ content, images }: UserMessageProps) {
 
   const handleCopy = useCallback((e: MouseEvent) => {
     e.stopPropagation()
-    navigator.clipboard.writeText(content)
+    ;(rpc as any).window.copyToClipboard(content)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
-  }, [content])
+  }, [content, rpc])
 
   return (
     <div

@@ -17,6 +17,7 @@ dist-electron/
 out/
 build/
 *.tsbuildinfo
+next-env.d.ts
 **/.next/
 .next/
 .nuxt/

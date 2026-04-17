@@ -37,16 +37,19 @@
   animation: shimmer 3.5s ease-in-out infinite;
 }
 
-/* Force all code/diff rendering to inherit font size from parent.
-   Each mode sets its own text size — everything inside must follow. */
+/* Inline code: 90% of surrounding font size so monospace visually matches
+   proportional text, and sizing scales with parent (consistent across modes). */
 .sd-inline-code,
 [data-streamdown] code:not(pre code) {
-  font-size: inherit !important;
+  font-size: 0.9em;
   line-height: inherit;
 }
 
-/* Streamdown code blocks — the wrapper div, .language-* wrapper, and pre/code inside it */
-[data-streamdown="code-block-body"],
+/* Streamdown code blocks — apply 0.9em only on the outermost body so monospace
+   visually aligns with proportional text. Inner pre/code inherit from body. */
+[data-streamdown="code-block-body"] {
+  font-size: 0.9em !important;
+}
 [data-streamdown] [class*="language-"],
 [data-streamdown] pre,
 [data-streamdown] pre code {

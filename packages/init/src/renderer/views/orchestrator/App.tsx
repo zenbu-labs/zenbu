@@ -47,8 +47,10 @@ type SessionItem = WindowState["sessions"][number];
 type AgentItem = SchemaRoot["agents"][number];
 type RegistryEntry = { scope: string; url: string; port: number };
 
-class OrchestratorErrorBoundary extends Component<
-  { children: ReactNode },
+type ErrorFallbackRender = (args: { error: Error; reset: () => void }) => ReactNode;
+
+class ErrorBoundary extends Component<
+  { children: ReactNode; scope: string; fallback: ErrorFallbackRender },
   { error: Error | null }
 > {
   state: { error: Error | null } = { error: null };
@@ -58,18 +60,21 @@ class OrchestratorErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("[orchestrator] Uncaught error:", error, info.componentStack);
+    console.error(`[orchestrator:${this.props.scope}] Uncaught error:`, error, info.componentStack);
   }
 
   render() {
     if (this.state.error) {
-      return <ErrorFallback error={this.state.error} onReset={() => this.setState({ error: null })} />;
+      return this.props.fallback({
+        error: this.state.error,
+        reset: () => this.setState({ error: null }),
+      });
     }
     return this.props.children;
   }
 }
 
-function ErrorFallback({ error, onReset }: { error: Error; onReset: () => void }) {
+function FullErrorFallback({ error, onReset }: { error: Error; onReset: () => void }) {
   const [showStack, setShowStack] = useState(false);
 
   return (
@@ -95,6 +100,31 @@ function ErrorFallback({ error, onReset }: { error: Error; onReset: () => void }
           className="mt-1 self-start rounded bg-neutral-800 px-3 py-1.5 text-xs text-white hover:bg-neutral-700 cursor-pointer"
         >
           Try again
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TitleBarErrorFallback({ error, onReset, hasTabs }: { error: Error; onReset: () => void; hasTabs: boolean }) {
+  return (
+    <div
+      className={`flex h-9 shrink-0 items-center gap-2 px-3 ${hasTabs ? "bg-[#E0E0E0]" : "bg-[#F4F4F4]"}`}
+      style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+    >
+      <div
+        className="flex flex-1 items-center gap-2 pl-[74px] min-w-0"
+        style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+      >
+        <span className="text-xs text-red-600 shrink-0">Title bar error</span>
+        <span className="text-xs text-neutral-500 font-mono truncate" title={error.message}>
+          {error.message}
+        </span>
+        <button
+          onClick={onReset}
+          className="ml-auto shrink-0 rounded bg-neutral-800 px-2 py-0.5 text-xs text-white hover:bg-neutral-700 cursor-pointer"
+        >
+          Retry
         </button>
       </div>
     </div>
@@ -382,7 +412,7 @@ function OrchestratorContent() {
           workspaceId: kernel.activeWorkspaceId,
           ...(inheritedCwd ? { cwd: inheritedCwd } : {}),
         },
-        eventLog: makeCollection({ collectionId: nanoid(), debugName: "eventLog" }),
+        eventLog: makeCollection({ collectionId: nanoid(), debugName: "eventLog", }),
         status: "idle",
         ...(validModel ? { model: lastAgent.model } : {}),
         ...(validThinking ? { thinkingLevel: lastAgent.thinkingLevel } : {}),
@@ -602,50 +632,66 @@ function OrchestratorContent() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  const hasTabs = paneState.panes.some((p) => p.type === "leaf" && p.tabIds.length > 1);
+
   return (
     <div className="flex h-full flex-col bg-[#F4F4F4]">
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} initialSection={settingsSection} />
-      <TitleBar
-        agents={agents}
-        sessions={sessions}
-        hasTabs={paneState.panes.some((p) => p.type === "leaf" && p.tabIds.length > 1)}
-        onSettings={() => setSettingsOpen(true)}
-        onNew={handleNewGlobal}
-        onLoadAgent={handleLoadAgent}
-      />
+      <ErrorBoundary
+        scope="title-bar"
+        fallback={({ error, reset }) => (
+          <TitleBarErrorFallback error={error} onReset={reset} hasTabs={hasTabs} />
+        )}
+      >
+        <TitleBar
+          agents={agents}
+          sessions={sessions}
+          hasTabs={hasTabs}
+          onSettings={() => setSettingsOpen(true)}
+          onNew={handleNewGlobal}
+          onLoadAgent={handleLoadAgent}
+        />
+      </ErrorBoundary>
       <div className="relative flex-1 min-h-0">
-        {(() => {
-          const rootPane = paneState.panes.find(
-            (p) => p.id === paneState.rootPaneId && p.type === "leaf",
-          );
-          if (rootPane) {
-            return (
-              <LeafPane
-                pane={rootPane}
-                agents={agents}
-                sessions={sessions}
-                registryMap={registryMap}
-                wsPort={wsPort}
-                onSwitchTab={handleSwitchTab}
-                onCloseTab={handleCloseTab}
-                onCloseTabQuiet={handleCloseTabQuiet}
-                onTabContextMenu={handleTabContextMenu}
-                onTabTearOff={handleTabTearOff}
-                onNewTab={handleNewTab}
-              />
+        <ErrorBoundary
+          scope="tabs"
+          fallback={({ error, reset }) => (
+            <FullErrorFallback error={error} onReset={reset} />
+          )}
+        >
+          {(() => {
+            const rootPane = paneState.panes.find(
+              (p) => p.id === paneState.rootPaneId && p.type === "leaf",
             );
-          }
-          return (
-            <div className="flex h-full items-center justify-center text-neutral-400 text-xs">
-              <button
-                onClick={handleNewGlobal}
-                className="px-3 py-1.5 rounded bg-neutral-200 hover:bg-neutral-300 text-neutral-600 transition-colors"
-              >
-                + New Chat
-              </button>
-            </div>
-          );
-        })()}
+            if (rootPane) {
+              return (
+                <LeafPane
+                  pane={rootPane}
+                  agents={agents}
+                  sessions={sessions}
+                  registryMap={registryMap}
+                  wsPort={wsPort}
+                  onSwitchTab={handleSwitchTab}
+                  onCloseTab={handleCloseTab}
+                  onCloseTabQuiet={handleCloseTabQuiet}
+                  onTabContextMenu={handleTabContextMenu}
+                  onTabTearOff={handleTabTearOff}
+                  onNewTab={handleNewTab}
+                />
+              );
+            }
+            return (
+              <div className="flex h-full items-center justify-center text-neutral-400 text-xs">
+                <button
+                  onClick={handleNewGlobal}
+                  className="px-3 py-1.5 rounded bg-neutral-200 hover:bg-neutral-300 text-neutral-600 transition-colors"
+                >
+                  + New Chat
+                </button>
+              </div>
+            );
+          })()}
+        </ErrorBoundary>
       </div>
     </div>
   );
@@ -690,8 +736,11 @@ export function App() {
   }
 
   return (
-    <OrchestratorErrorBoundary>
+    <ErrorBoundary
+      scope="root"
+      fallback={({ error, reset }) => <FullErrorFallback error={error} onReset={reset} />}
+    >
       <ConnectedApp connection={connection} />
-    </OrchestratorErrorBoundary>
+    </ErrorBoundary>
   );
 }
