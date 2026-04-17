@@ -47,20 +47,6 @@ const windowStateSchema = zod.object({
 });
 
 export const appSchema = createSchema({
-  workspaces: f
-    .array(
-      zod.object({
-        id: zod.string(),
-        name: zod.string(),
-        cwd: zod.string(),
-        color: zod.string().optional(),
-        pinnedAgentIds: zod.array(zod.string()).default([]),
-        lastSelectedAgentId: zod.string().optional(),
-        contextFiles: zod.array(zod.string()).default([]),
-      }),
-    )
-    .default([]),
-  activeWorkspaceId: f.string().default(""),
   agentConfigs: f
     .array(
       zod.object({
@@ -102,7 +88,7 @@ export const appSchema = createSchema({
         id: "codex",
         name: "codex",
         startCommand:
-          "{HOME}/.zenbu/plugins/zenbu/packages/init/node_modules/.bin/tsx {HOME}/.zenbu/plugins/zenbu/packages/codex-acp/src/index.ts",
+          "$ZENBU_BUN $HOME/.zenbu/plugins/zenbu/packages/codex-acp/src/index.ts",
         availableModels: [],
         availableThinkingLevels: [],
         availableModes: [],
@@ -111,7 +97,7 @@ export const appSchema = createSchema({
         id: "claude",
         name: "claude",
         startCommand:
-          "{HOME}/.zenbu/plugins/zenbu/packages/init/node_modules/.bin/tsx {HOME}/.zenbu/plugins/zenbu/packages/claude-acp/src/index.ts",
+          "$ZENBU_BUN $HOME/.zenbu/plugins/zenbu/packages/claude-acp/src/index.ts",
         availableModels: [],
         availableThinkingLevels: [],
         availableModes: [],

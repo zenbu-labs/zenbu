@@ -234,18 +234,7 @@ function ComposerCwdInner({
     return null;
   }, [events]);
 
-  const workspaces = useDb((root) => root.plugin.kernel.workspaces) as
-    | { id: string; cwd: string }[]
-    | undefined;
-  const activeWorkspaceId = useDb(
-    (root) => root.plugin.kernel.activeWorkspaceId,
-  ) as string | undefined;
-  const workspace = useMemo(
-    () => workspaces?.find((w) => w.id === activeWorkspaceId),
-    [workspaces, activeWorkspaceId],
-  );
-  const agentCwd =
-    (agent?.metadata?.cwd as string | undefined) ?? workspace?.cwd;
+  const agentCwd = agent?.metadata?.cwd as string | undefined;
 
   const template = useMemo(
     () => agentConfigs?.find((c) => c.id === agent?.configId),

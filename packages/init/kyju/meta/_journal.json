@@ -95,6 +95,16 @@
       "idx": 18,
       "tag": "default_agents",
       "when": 1776463097185
+    },
+    {
+      "idx": 19,
+      "tag": "remove_workspaces",
+      "when": 1776465584976
+    },
+    {
+      "idx": 20,
+      "tag": "default_agents_bun",
+      "when": 1776466127389
     }
   ]
 }

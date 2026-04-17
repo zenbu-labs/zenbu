@@ -38,6 +38,7 @@ import {
 const params = new URLSearchParams(window.location.search);
 const wsPort = Number(params.get("wsPort"));
 const windowId = params.get("windowId");
+const defaultCwd = params.get("defaultCwd") ?? "";
 if (!windowId) throw new Error("Missing ?windowId= in orchestrator URL");
 
 import type { SchemaRoot } from "../../../../shared/schema";
@@ -375,15 +376,11 @@ function OrchestratorContent() {
     const focusedAgent = focusedSession
       ? (kernel.agents ?? []).find((a) => a.id === focusedSession.agentId)
       : undefined;
-    const focusedWorkspace = focusedAgent
-      ? (kernel.workspaces ?? []).find(
-          (w) => w.id === (focusedAgent.metadata as any)?.workspaceId,
-        )
-      : undefined;
     const inheritedCwd =
-      (typeof focusedAgent?.metadata?.cwd === "string"
+      typeof focusedAgent?.metadata?.cwd === "string"
         ? (focusedAgent.metadata.cwd as string)
-        : undefined) ?? focusedWorkspace?.cwd;
+        : undefined;
+    const newAgentCwd = inheritedCwd ?? defaultCwd;
 
     // Copy config from most recent agent with same configId, validating against available options
     const existingAgents = (kernel.agents ?? []).filter(
@@ -409,8 +406,7 @@ function OrchestratorContent() {
         startCommand: selectedConfig.startCommand,
         configId: selectedConfig.id,
         metadata: {
-          workspaceId: kernel.activeWorkspaceId,
-          ...(inheritedCwd ? { cwd: inheritedCwd } : {}),
+          ...(newAgentCwd ? { cwd: newAgentCwd } : {}),
         },
         eventLog: makeCollection({ collectionId: nanoid(), debugName: "eventLog", }),
         status: "idle",

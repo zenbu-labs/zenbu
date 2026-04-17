@@ -1,5 +1,6 @@
 import net from "node:net";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
 import { nanoid } from "nanoid";
@@ -9,6 +10,7 @@ import { DbService } from "./db";
 import { INTERNAL_DIR, RUNTIME_JSON, SOCKET_DIR, CLI_SOCKET_PATH } from "../../../shared/paths";
 
 const DB_PATH = path.join(process.cwd(), ".zenbu", "db");
+const DEFAULT_CWD = path.join(os.homedir(), ".zenbu");
 
 function matchAgentConfig(
   configs: Array<{ id: string; name: string; startCommand: string }>,
@@ -91,20 +93,6 @@ export class CliSocketService extends Service {
           client.update((root) => {
             const k = root.plugin.kernel;
 
-            if (cmd.cwd) {
-              const existing = (k.workspaces ?? []).find((w) => w.cwd === cmd.cwd);
-              if (existing) {
-                k.activeWorkspaceId = existing.id;
-              } else {
-                const wsId = nanoid();
-                k.workspaces = [
-                  ...(k.workspaces ?? []),
-                  { id: wsId, name: path.basename(cmd.cwd!), cwd: cmd.cwd!, pinnedAgentIds: [], contextFiles: [] },
-                ];
-                k.activeWorkspaceId = wsId;
-              }
-            }
-
             k.agents = [
               ...(k.agents ?? []),
               {
@@ -113,7 +101,7 @@ export class CliSocketService extends Service {
                 startCommand: matched!.startCommand,
                 configId: matched!.id,
                 status: "idle" as const,
-                metadata: { workspaceId: k.activeWorkspaceId },
+                metadata: { cwd: cmd.cwd ?? DEFAULT_CWD },
                 eventLog: makeCollection({ collectionId: nanoid(), debugName: "eventLog" }),
                 title: {kind: "not-available"}
               },

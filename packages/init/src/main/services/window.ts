@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -24,6 +25,7 @@ import { registerAdvice, registerContentScript } from "./advice-config";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const DEFAULT_VIEW_PATH = "/views/orchestrator/index.html";
+const DEFAULT_CWD = path.join(os.homedir(), ".zenbu");
 
 export class WindowService extends Service {
   static key = "window";
@@ -82,7 +84,7 @@ export class WindowService extends Service {
             startCommand: selectedConfig.startCommand,
             configId: selectedConfig.id,
             status: "idle" as const,
-            metadata: { workspaceId: k.activeWorkspaceId },
+            metadata: { cwd: DEFAULT_CWD },
             eventLog: makeCollection({
               collectionId: nanoid(),
               debugName: "eventLog",
@@ -160,40 +162,6 @@ export class WindowService extends Service {
     return undefined;
   }
 
-  async openWorkspacePicker(): Promise<{
-    id: string;
-    name: string;
-    cwd: string;
-  } | null> {
-    const focusedWin = [...this.ctx.baseWindow.windows.values()].find(
-      (w: Electron.BaseWindow) => w.isFocused(),
-    );
-    const result = await dialog.showOpenDialog({
-      ...(focusedWin ? { window: focusedWin } : {}),
-      properties: ["openDirectory"],
-      title: "Open Workspace",
-    } as Electron.OpenDialogOptions);
-
-    if (result.canceled || result.filePaths.length === 0) return null;
-
-    const cwd = result.filePaths[0]!;
-    const name = path.basename(cwd);
-    const id = nanoid();
-    const workspace = { id, name, cwd, pinnedAgentIds: [], contextFiles: [] };
-
-    const client = this.ctx.db.client;
-    await Effect.runPromise(
-      client.update((root) => {
-        root.plugin.kernel.workspaces = [
-          ...(root.plugin.kernel.workspaces ?? []),
-          workspace,
-        ];
-      }),
-    );
-
-    return workspace;
-  }
-
   async showContextMenu(
     items: { id: string; label: string; enabled?: boolean }[],
   ): Promise<string | null> {
@@ -233,47 +201,6 @@ export class WindowService extends Service {
 
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0]!;
-  }
-
-  async createWorkspace(opts: {
-    name: string;
-    color?: string;
-    cwd: string;
-  }): Promise<{ id: string; name: string; cwd: string; color?: string }> {
-    const id = nanoid();
-    const workspace = {
-      id,
-      name: opts.name,
-      cwd: opts.cwd,
-      color: opts.color,
-      pinnedAgentIds: [] as string[],
-      lastSelectedAgentId: undefined,
-      contextFiles: [],
-    };
-
-    const client = this.ctx.db.client;
-    await Effect.runPromise(
-      client.update((root) => {
-        root.plugin.kernel.workspaces = [
-          ...(root.plugin.kernel.workspaces ?? []),
-          workspace,
-        ];
-        root.plugin.kernel.activeWorkspaceId = id;
-      }),
-    );
-
-    return workspace;
-  }
-
-  async removeWorkspace(id: string) {
-    const client = this.ctx.db.client;
-    await Effect.runPromise(
-      client.update((root) => {
-        root.plugin.kernel.workspaces = (
-          root.plugin.kernel.workspaces ?? []
-        ).filter((w) => w.id !== id);
-      }),
-    );
   }
 
   async moveTabToNewWindow(opts: {
@@ -722,6 +649,8 @@ export class WindowService extends Service {
         const cwd = process.cwd();
         const qs = `wsPort=${http.port}&cwd=${encodeURIComponent(
           cwd,
+        )}&defaultCwd=${encodeURIComponent(
+          DEFAULT_CWD,
         )}&webContentsId=${view.webContents.id}&windowId=${encodeURIComponent(
           windowId,
         )}`;

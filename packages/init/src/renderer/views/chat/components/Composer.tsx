@@ -514,7 +514,7 @@ export function Composer({
             slashMenuOpenRef={slashMenuOpenRef}
           />
           <AutoFocusPlugin />
-          <FilePickerPlugin menuOpenRef={filePickerOpenRef} />
+          <FilePickerPlugin menuOpenRef={filePickerOpenRef} agentId={agentId} />
           <ImagePastePlugin />
           <DraftPersistencePlugin agentId={agentId} />
           <SlashCommandPlugin

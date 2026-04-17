@@ -1,9 +1,12 @@
+import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
 import { nanoid } from "nanoid";
 import { makeCollection } from "@zenbu/kyju/schema";
 import { Service, runtime } from "../runtime";
 import { DbService } from "./db";
+
+const DEFAULT_CWD = path.join(os.homedir(), ".zenbu");
 
 function parseZenArgs(argv: string[]): {
   agent?: string;
@@ -75,28 +78,6 @@ export class CliIntentService extends Service {
       client.update((root) => {
         const kernel = root.plugin.kernel;
 
-        if (cwd) {
-          const existing = (kernel.workspaces ?? []).find(
-            (w) => w.cwd === cwd,
-          );
-          if (existing) {
-            kernel.activeWorkspaceId = existing.id;
-          } else {
-            const id = nanoid();
-            kernel.workspaces = [
-              ...(kernel.workspaces ?? []),
-              {
-                id,
-                name: path.basename(cwd),
-                cwd,
-                pinnedAgentIds: [],
-                contextFiles: [],
-              },
-            ];
-            kernel.activeWorkspaceId = id;
-          }
-        }
-
         if (existingAgentId) {
           const existingAgent = (kernel.agents ?? []).find((a) => a.id === existingAgentId);
           if (!existingAgent) {
@@ -150,7 +131,7 @@ export class CliIntentService extends Service {
               startCommand: matched.startCommand,
               configId: matched.id,
               status: "idle" as const,
-              metadata: { workspaceId: kernel.activeWorkspaceId },
+              metadata: { cwd: cwd ?? DEFAULT_CWD },
               eventLog: makeCollection({ collectionId: nanoid(), debugName: "eventLog" }),
               title: {kind :"not-available"}
             },
@@ -170,13 +151,6 @@ export class CliIntentService extends Service {
               sidebarPanel: "overview",
             },
           ];
-
-          const ws = (kernel.workspaces ?? []).find(
-            (w) => w.id === kernel.activeWorkspaceId,
-          );
-          if (ws) {
-            ws.lastSelectedAgentId = agentId;
-          }
         }
       }),
     ).catch((err) => {

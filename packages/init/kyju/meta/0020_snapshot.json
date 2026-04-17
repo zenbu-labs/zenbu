@@ -1,0 +1,155 @@
+{
+  "id": "7bed15b9-e247-4dfc-b781-ea04dd47c91d",
+  "prevId": "e960b4e8-da0b-4ad2-86ce-7dd9620a89b2",
+  "fields": {
+    "agentConfigs": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "7e9e42f066b590b4",
+      "default": [
+        {
+          "id": "codex",
+          "name": "codex",
+          "startCommand": "$ZENBU_BUN $HOME/.zenbu/plugins/zenbu/packages/codex-acp/src/index.ts",
+          "availableModels": [],
+          "availableThinkingLevels": [],
+          "availableModes": []
+        },
+        {
+          "id": "claude",
+          "name": "claude",
+          "startCommand": "$ZENBU_BUN $HOME/.zenbu/plugins/zenbu/packages/claude-acp/src/index.ts",
+          "availableModels": [],
+          "availableThinkingLevels": [],
+          "availableModes": []
+        }
+      ]
+    },
+    "agents": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "539aa21459f5fbbb",
+      "default": []
+    },
+    "selectedConfigId": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": "codex"
+    },
+    "summarizationAgentConfigId": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "12539628f53a3f78",
+      "default": null
+    },
+    "summarizationModel": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "12539628f53a3f78",
+      "default": null
+    },
+    "acpSessions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "543a2197adc75660",
+      "default": {}
+    },
+    "sessions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "f800dd2720707f96",
+      "default": []
+    },
+    "orchestratorViewPath": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": "/views/orchestrator/index.html"
+    },
+    "sidebarOpen": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "7cb541e84f226754",
+      "default": false
+    },
+    "tabSidebarOpen": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "7cb541e84f226754",
+      "default": true
+    },
+    "sidebarPanel": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": "overview"
+    },
+    "viewRegistry": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "d38b50a8c731c28c",
+      "default": []
+    },
+    "views": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "66ddd94dc5c72abc",
+      "default": []
+    },
+    "panes": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "f67f364550117691",
+      "default": []
+    },
+    "rootPaneId": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": ""
+    },
+    "focusedPaneId": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": ""
+    },
+    "commands": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "0fa6844b1a83162b",
+      "default": []
+    },
+    "chatBlobs": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "3249af5c01c8185c",
+      "default": []
+    },
+    "composerDrafts": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "4cf250d56ea5e949",
+      "default": {}
+    },
+    "windowStates": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "c9f824a590ba57d5",
+      "default": []
+    },
+    "majorMode": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": "fundamental-mode"
+    },
+    "minorModes": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "e2c7a0c35cb2fd9d",
+      "default": []
+    }
+  }
+}

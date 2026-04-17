@@ -68,8 +68,10 @@ const MAX_RESULTS = 50
 
 export function FilePickerPlugin({
   menuOpenRef,
+  agentId,
 }: {
   menuOpenRef: React.RefObject<boolean>
+  agentId: string
 }) {
   const [editor] = useLexicalComposerContext()
   const rpc = useRpc()
@@ -77,13 +79,12 @@ export function FilePickerPlugin({
   const [query, setQuery] = useState<string | null>(null)
   const justPastedRef = usePasteSuppression()
 
-  const workspaces = useDb((root) => root.plugin.kernel.workspaces)
-  const activeWorkspaceId = useDb((root) => root.plugin.kernel.activeWorkspaceId)
+  const agents = useDb((root) => root.plugin.kernel.agents)
   const cwd = useMemo(() => {
-    const list = workspaces ?? []
-    const ws = list.find((w) => w.id === activeWorkspaceId) ?? list[0]
-    return ws?.cwd
-  }, [workspaces, activeWorkspaceId])
+    const agent = (agents ?? []).find((a: any) => a.id === agentId)
+    const c = agent?.metadata?.cwd
+    return typeof c === "string" ? c : undefined
+  }, [agents, agentId])
 
   useEffect(() => {
     let cancelled = false

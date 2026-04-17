@@ -14,14 +14,48 @@ import { HttpService } from "./http";
 type ImageRef = { blobId: string; mimeType: string };
 
 const DB_BLOBS_DIR = path.join(process.cwd(), ".zenbu", "db", "blobs");
+const PATHS_JSON = path.join(os.homedir(), ".zenbu", ".internal", "paths.json");
 
-function parseStartCommand(startCommand: string): {
-  command: string;
-  args: string[];
-} {
-  const expanded = startCommand.replace(/\{HOME\}/g, os.homedir());
-  const parts = expanded.split(/\s+/);
-  return { command: parts[0], args: parts.slice(1) };
+type ZenbuPaths = { bunPath?: string; pnpmPath?: string };
+
+function readZenbuPaths(): ZenbuPaths {
+  try {
+    return JSON.parse(fs.readFileSync(PATHS_JSON, "utf8")) as ZenbuPaths;
+  } catch {
+    return {};
+  }
+}
+
+function buildAcpEnv(): Record<string, string> {
+  const paths = readZenbuPaths();
+  const env: Record<string, string> = {};
+  if (paths.bunPath) env.ZENBU_BUN = paths.bunPath;
+  if (paths.pnpmPath) env.ZENBU_PNPM = paths.pnpmPath;
+  return env;
+}
+
+function expandVars(
+  input: string,
+  extraEnv: Record<string, string>,
+): string {
+  // Expand $VAR / ${VAR} against process.env + extraEnv, leading ~ against
+  // home, and legacy {HOME} for older stored configs.
+  const env = { ...process.env, ...extraEnv };
+  let out = input.replace(/\{HOME\}/g, os.homedir());
+  out = out.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name) => env[name] ?? "");
+  out = out.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_, name) => env[name] ?? "");
+  // Expand `~` only when it's the start of a token (standalone or followed by /).
+  out = out.replace(/(^|\s)~(?=\/|\s|$)/g, (_, pre) => `${pre}${os.homedir()}`);
+  return out;
+}
+
+function parseStartCommand(
+  startCommand: string,
+  extraEnv: Record<string, string>,
+): { command: string; args: string[] } {
+  const expanded = expandVars(startCommand, extraEnv);
+  const parts = expanded.split(/\s+/).filter(Boolean);
+  return { command: parts[0] ?? "", args: parts.slice(1) };
 }
 
 function extractOptionEntries(
@@ -120,24 +154,6 @@ export class AgentService extends Service {
   private pendingContinues = new Set<string>();
   private hasSentFirst = new Set<string>();
 
-  private getWorkspaceCwd(): string {
-    const kernel = this.ctx.db.client.readRoot().plugin.kernel;
-    /**
-     * we should rethink the concept of workspaces
-     * 
-     * in my head anytime u select a cwd that should be a workspace
-     * but that doesn't make sense, and for the default 
-     * configuration there is no concept of workspaces
-     * this should be deleted and moved to plugin storage
-     */
-    const ws = (kernel.workspaces ?? []).find(
-      (w) => w.id === kernel.activeWorkspaceId,
-    );
-    // No workspace context (e.g. spotlight/dock launch): default to ~/.zenbu
-    // so the user can start modifying the app itself without first picking a cwd.
-    return ws?.cwd ?? path.join(os.homedir(), ".zenbu");
-  }
-
   private async ensureProcess(agentId: string): Promise<Agent> {
     const existing = this.processes.get(agentId);
     if (existing) return existing;
@@ -150,12 +166,16 @@ export class AgentService extends Service {
         `Agent "${agentId}" has no startCommand configured. Set one in Settings.`,
       );
     }
-    const { command, args } = parseStartCommand(agentConfig.startCommand);
+    const extraEnv = buildAcpEnv();
+    const { command, args } = parseStartCommand(
+      agentConfig.startCommand,
+      extraEnv,
+    );
     const agentCwd =
       typeof agentConfig.metadata?.cwd === "string"
         ? agentConfig.metadata.cwd
         : undefined;
-    const cwd = agentCwd || this.getWorkspaceCwd();
+    const cwd = agentCwd || path.join(os.homedir(), ".zenbu");
 
     const eventLog: EventLog = {
       append: (events) => {
@@ -218,6 +238,7 @@ export class AgentService extends Service {
           command,
           args,
           cwd,
+          env: extraEnv,
           handlers: {
             requestPermission: async () => ({
               outcome: { outcome: "selected" as const, optionId: "allow" },
@@ -434,8 +455,17 @@ export class AgentService extends Service {
     await this.setAgentTitle(agentId, { kind: "generating" });
 
     try {
-      const { command, args } = parseStartCommand(template.startCommand);
-      const cwd = this.getWorkspaceCwd();
+      const extraEnv = buildAcpEnv();
+      const { command, args } = parseStartCommand(
+        template.startCommand,
+        extraEnv,
+      );
+      const agentNode = (kernel.agents ?? []).find((a) => a.id === agentId);
+      const agentCwd =
+        typeof agentNode?.metadata?.cwd === "string"
+          ? agentNode.metadata.cwd
+          : undefined;
+      const cwd = agentCwd || path.join(os.homedir(), ".zenbu");
 
       let collectedText = "";
       const eventLog: EventLog = {
@@ -466,6 +496,7 @@ export class AgentService extends Service {
             command,
             args,
             cwd,
+            env: extraEnv,
             handlers: {
               requestPermission: async () => ({
                 outcome: { outcome: "selected" as const, optionId: "allow" },
@@ -517,41 +548,12 @@ export class AgentService extends Service {
     }
   }
 
-  private async getContextBlocks(): Promise<
-    Array<{ type: "text"; text: string }>
-  > {
-    const kernel = this.ctx.db.client.readRoot().plugin.kernel;
-    const ws = (kernel.workspaces ?? []).find(
-      (w) => w.id === kernel.activeWorkspaceId,
-    );
-    const files = ws?.contextFiles ?? [];
-    if (files.length === 0) return [];
-
-    const blocks: Array<{ type: "text"; text: string }> = [];
-    for (const filePath of files) {
-      try {
-        const content = await fsp.readFile(filePath, "utf-8");
-        blocks.push({
-          type: "text",
-          text: `Context file: ${filePath}\n\n${content}`,
-        });
-      } catch {
-        // skip files that can't be read
-      }
-    }
-    return blocks;
-  }
-
   async send(agentId: string, text: string, images?: ImageRef[]) {
     const agent = await this.ensureProcess(agentId);
 
     const isFirstMessage = !(this.hasSentFirst ??= new Set()).has(agentId);
     if (isFirstMessage) {
       this.hasSentFirst.add(agentId);
-      const contextBlocks = await this.getContextBlocks();
-      if (contextBlocks.length > 0) {
-        await Effect.runPromise(agent.setInitialContext(contextBlocks as any));
-      }
     }
 
     if (isFirstMessage && text) {
@@ -670,7 +672,10 @@ export class AgentService extends Service {
 
     const process = this.processes.get(agentId);
     if (process) {
-      const { command, args } = parseStartCommand(newTemplate.startCommand);
+      const { command, args } = parseStartCommand(
+        newTemplate.startCommand,
+        buildAcpEnv(),
+      );
       try {
         await Effect.runPromise(process.changeStartCommand(command, args));
       } catch (err) {
