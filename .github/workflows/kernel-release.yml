@@ -91,4 +91,8 @@ jobs:
             EXTRA+=(--config.mac.identity=null)
             export CSC_IDENTITY_AUTO_DISCOVERY=false
           fi
-          pnpm exec electron-builder --${{ matrix.target }} --publish always "${EXTRA[@]}"
+          # Invoke electron-builder's bin directly instead of `pnpm exec`.
+          # `pnpm exec` puts electron-builder into pnpm-workspace mode where
+          # its collector walks the workspace's isolated .pnpm store instead
+          # of our prepared flat node_modules — undoing the whole fix above.
+          ./node_modules/.bin/electron-builder --${{ matrix.target }} --publish always "${EXTRA[@]}"
