@@ -29,7 +29,12 @@ echo "[prep-flat-deploy] staging at $STAGING"
 rm -rf "$STAGING"
 
 echo "[prep-flat-deploy] pnpm deploy with node-linker=hoisted"
-pnpm --filter=@zenbu/kernel --prod --config.node-linker=hoisted deploy "$STAGING"
+# pnpm 10 changed deploy semantics to require inject-workspace-packages=true
+# by default. We don't want to restructure the whole workspace for one tool,
+# so pass --legacy to fall back to pnpm 9's deploy implementation.
+# https://pnpm.io/cli/deploy
+pnpm --filter=@zenbu/kernel --prod --legacy \
+  --config.node-linker=hoisted deploy "$STAGING"
 
 # Preserve devDep binaries we still need (electron-builder itself, electron
 # for @electron/rebuild). Keeping the original node_modules under a sidecar
