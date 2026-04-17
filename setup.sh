@@ -117,38 +117,32 @@ verify_sha256() {
 # ---------- ensure_* steps ----------
 
 ensure_dirs() {
-  step_start ensure_dirs "Preparing cache + internal dirs"
   mkdir -p "$BIN_DIR" "$BUN_INSTALL" "$PNPM_HOME" \
     "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" \
     "$INTERNAL_DIR" "$REGISTRY_DIR" "$CLI_BIN_DIR"
-  log_ok "cache root: $CACHE_ROOT"
-  step_done ensure_dirs
 }
 
 ensure_git() {
-  step_start ensure_git "Checking git / Xcode Command Line Tools"
   if ! command -v git >/dev/null 2>&1; then
     step_offer xcode-cli "xcode-select --install"
-    step_error ensure_git "git not found — install Xcode Command Line Tools"
-    exit 1
+    echo "git not found — install Xcode Command Line Tools" >&2
+    return 1
   fi
   # Detect the stub (xcode-select not fully configured).
   if ! git --version >/dev/null 2>&1; then
     step_offer xcode-cli "xcode-select --install"
-    step_error ensure_git "git stub — install Xcode Command Line Tools"
-    exit 1
+    echo "git stub — install Xcode Command Line Tools" >&2
+    return 1
   fi
-  log_ok "git found: $(command -v git)"
-  step_done ensure_git
+  log_ok "git: $(command -v git)"
 }
 
 ensure_bun() {
-  step_start ensure_bun "Installing bun into isolated cache"
   local target version asset url sha expected_sha
   target="$(detect_bun_target)"
   if [ -z "$target" ]; then
-    step_error ensure_bun "unsupported architecture: $(uname -m)"
-    exit 1
+    echo "unsupported architecture: $(uname -m)" >&2
+    return 1
   fi
   version="$(read_version bun version)"
   asset="$(read_target_field bun "$target" asset)"
@@ -158,8 +152,7 @@ ensure_bun() {
   local current=""
   if [ -f "$marker" ]; then current="$(cat "$marker" 2>/dev/null || true)"; fi
   if [ -x "${BIN_DIR}/bun" ] && [ "$current" = "$version" ]; then
-    log_ok "bun $version already installed at ${BIN_DIR}/bun"
-    step_done ensure_bun
+    log_ok "bun $version already installed"
     return
   fi
   local tag="bun-v${version}"
@@ -167,33 +160,29 @@ ensure_bun() {
   local tmpdir
   tmpdir="$(mktemp -d)"
   local zip_path="${tmpdir}/${asset}"
-  log_do "downloading $url"
+  log_do "downloading bun $version"
   curl -fL --progress-bar -o "$zip_path" "$url"
-  log_do "verifying sha256"
   verify_sha256 "$zip_path" "$expected_sha"
-  log_do "extracting"
   (cd "$tmpdir" && unzip -q "$asset")
   # bun releases extract to a dir like bun-darwin-aarch64/bun
   local extracted
   extracted="$(find "$tmpdir" -type f -name bun -perm -u+x | head -1)"
   if [ -z "$extracted" ]; then
-    step_error ensure_bun "could not locate bun binary in $asset"
-    exit 1
+    echo "could not locate bun binary in $asset" >&2
+    return 1
   fi
   install -m 0755 "$extracted" "${BIN_DIR}/bun"
   printf "%s" "$version" > "$marker"
   rm -rf "$tmpdir"
-  log_ok "bun $version installed at ${BIN_DIR}/bun"
-  step_done ensure_bun
+  log_ok "bun $version installed"
 }
 
 ensure_pnpm() {
-  step_start ensure_pnpm "Installing pnpm into isolated cache"
   local target version asset url expected_sha
   target="$(detect_pnpm_target)"
   if [ -z "$target" ]; then
-    step_error ensure_pnpm "unsupported architecture: $(uname -m)"
-    exit 1
+    echo "unsupported architecture: $(uname -m)" >&2
+    return 1
   fi
   version="$(read_version pnpm version)"
   asset="$(read_target_field pnpm "$target" asset)"
@@ -202,49 +191,37 @@ ensure_pnpm() {
   local current=""
   if [ -f "$marker" ]; then current="$(cat "$marker" 2>/dev/null || true)"; fi
   if [ -x "${BIN_DIR}/pnpm" ] && [ "$current" = "$version" ]; then
-    log_ok "pnpm $version already installed at ${BIN_DIR}/pnpm"
-    step_done ensure_pnpm
+    log_ok "pnpm $version already installed"
     return
   fi
   local tag="v${version}"
   url="https://github.com/pnpm/pnpm/releases/download/${tag}/${asset}"
   local tmp="${BIN_DIR}/.pnpm.download"
-  log_do "downloading $url"
+  log_do "downloading pnpm $version"
   curl -fL --progress-bar -o "$tmp" "$url"
-  log_do "verifying sha256"
   verify_sha256 "$tmp" "$expected_sha"
   chmod +x "$tmp"
   mv "$tmp" "${BIN_DIR}/pnpm"
   printf "%s" "$version" > "$marker"
-  log_ok "pnpm $version installed at ${BIN_DIR}/pnpm"
-  step_done ensure_pnpm
+  log_ok "pnpm $version installed"
 }
 
 ensure_remote() {
-  step_start ensure_remote "Verifying git remote"
   if [ ! -d ".git" ]; then
-    log_do "initializing git + origin"
     git init -q
     git remote add origin "$REPO_URL"
     git fetch --depth 1 origin main -q
     git reset origin/main -q
     log_ok "linked to remote"
-  else
-    log_ok "already a git repo"
   fi
-  step_done ensure_remote
 }
 
 ensure_deps_installed() {
-  step_start ensure_deps_installed "Installing monorepo dependencies"
-  log_do "pnpm install (isolated)"
-  "${BIN_DIR}/pnpm" install --filter='!@zenbu/kernel' --silent
-  log_ok "deps installed"
-  step_done ensure_deps_installed
+  # Full output (no --silent) so real errors surface in the setup window log.
+  "${BIN_DIR}/pnpm" install --filter='!@zenbu/kernel'
 }
 
 ensure_tsconfig_local() {
-  step_start ensure_tsconfig_local "Writing tsconfig.local.json"
   local packages_dir tsconfig
   packages_dir="${REPO_DIR}/packages"
   tsconfig="${REPO_DIR}/packages/init/tsconfig.local.json"
@@ -263,17 +240,12 @@ ensure_tsconfig_local() {
 EOF
 )
   if [ -f "$tsconfig" ] && [ "$(cat "$tsconfig")" = "$expected" ]; then
-    log_ok "tsconfig.local.json already current"
-    step_done ensure_tsconfig_local
     return
   fi
   printf "%s\n" "$expected" > "$tsconfig"
-  log_do "wrote $tsconfig"
-  step_done ensure_tsconfig_local
 }
 
 ensure_kernel_manifest_registered() {
-  step_start ensure_kernel_manifest_registered "Registering plugin manifests in ~/.zenbu/config.json"
   local config_json="${HOME_DIR}/.zenbu/config.json"
   local kernel_manifest="${REPO_DIR}/packages/init/zenbu.plugin.json"
   local zen_manifest="${REPO_DIR}/packages/zen/zenbu.plugin.json"
@@ -301,11 +273,9 @@ if changed:
 else:
     print("  ✓ plugin manifests already registered")
 PY
-  step_done ensure_kernel_manifest_registered
 }
 
 ensure_zen_shim() {
-  step_start ensure_zen_shim "Installing zen CLI shim"
   local expected
   expected=$(cat <<'EOF'
 #!/usr/bin/env bash
@@ -343,17 +313,13 @@ exec "$BUN" "$HOME/.zenbu/plugins/zenbu/packages/zen/src/bin.ts" "$@"
 EOF
 )
   if [ -f "$ZEN_SHIM" ] && [ "$(cat "$ZEN_SHIM")" = "$expected" ]; then
-    log_ok "zen shim already current"
-  else
-    printf "%s\n" "$expected" > "$ZEN_SHIM"
-    chmod +x "$ZEN_SHIM"
-    log_do "installed zen shim at $ZEN_SHIM"
+    return
   fi
-  step_done ensure_zen_shim
+  printf "%s\n" "$expected" > "$ZEN_SHIM"
+  chmod +x "$ZEN_SHIM"
 }
 
 ensure_path_wired() {
-  step_start ensure_path_wired "Wiring ~/.zenbu/bin onto PATH"
   local shell_name rc
   shell_name="$(basename "${SHELL:-/bin/zsh}")"
   case "$shell_name" in
@@ -374,8 +340,6 @@ ensure_path_wired() {
 
   mkdir -p "$(dirname "$rc")"
   if [ -f "$rc" ] && grep -Fq "$PATH_SENTINEL" "$rc"; then
-    log_ok "PATH already wired in $rc"
-    step_done ensure_path_wired
     return
   fi
   # Append sentinel + export line for the detected shell
@@ -384,21 +348,20 @@ ensure_path_wired() {
   else
     printf '\n%s\nexport PATH="$HOME/.zenbu/bin:$PATH"\n' "$PATH_SENTINEL" >> "$rc"
   fi
-  log_do "appended sentinel + PATH export to $rc"
-  step_done ensure_path_wired
+  log_ok "PATH wired in $rc"
 }
 
 ensure_registry_types() {
-  step_start ensure_registry_types "Generating registry types (zen link)"
-  "${BIN_DIR}/bun" "${REPO_DIR}/packages/zen/src/bin.ts" link || {
-    step_error ensure_registry_types "zen link failed"
-    exit 1
-  }
-  step_done ensure_registry_types
+  # `zen link` looks up from CWD for a zenbu.plugin.json. setup.sh's CWD is
+  # the repo root, which has no manifest — pass the manifests explicitly for
+  # both plugins so both sections land in ~/.zenbu/registry/.
+  "${BIN_DIR}/bun" "${REPO_DIR}/packages/zen/src/bin.ts" link \
+    "${REPO_DIR}/packages/init/zenbu.plugin.json"
+  "${BIN_DIR}/bun" "${REPO_DIR}/packages/zen/src/bin.ts" link \
+    "${REPO_DIR}/packages/zen/zenbu.plugin.json"
 }
 
 ensure_db_config() {
-  step_start ensure_db_config "Writing db config"
   local db_path="${REPO_DIR}/packages/init/.zenbu/db"
   local db_json="${INTERNAL_DIR}/db.json"
   python3 - "$db_json" "$db_path" <<'PY'
@@ -416,38 +379,74 @@ else:
         json.dump({"dbPath": db}, f, indent=2)
     print("  → wrote", out)
 PY
-  step_done ensure_db_config
 }
 
 ensure_app_path() {
-  step_start ensure_app_path "Registering app path"
   local default="/Applications/Zenbu.app/Contents/MacOS/Zenbu"
   if [ -x "$default" ]; then
-    "${BIN_DIR}/bun" "${REPO_DIR}/packages/zen/src/bin.ts" config set appPath "$default" 2>/dev/null || true
-    log_ok "app path registered ($default)"
-  else
-    log_ok "app not in /Applications; will register on first app launch"
+    "${BIN_DIR}/bun" "${REPO_DIR}/packages/zen/src/bin.ts" \
+      config set appPath "$default" 2>/dev/null || true
   fi
-  step_done ensure_app_path
+}
+
+# ---------- grouped step runner ----------
+# Run a group of silent ensure_* functions as one visible setup-window step.
+# Streams the group's stdout/stderr into the log; on failure, emits
+# ##ZENBU_STEP:error with the last stderr line so the UI has something useful.
+
+run_step() {
+  local id="$1" label="$2"
+  shift 2
+  step_start "$id" "$label"
+  local errfile
+  errfile="$(mktemp)"
+  # Run the group, tee stderr so we can grab the last line on failure.
+  if "$@" 2> >(tee "$errfile" >&2); then
+    step_done "$id"
+    rm -f "$errfile"
+  else
+    local code=$?
+    local last_err
+    last_err="$(tail -n 1 "$errfile" 2>/dev/null | tr '\n' ' ' | sed 's/^ *//;s/ *$//')"
+    rm -f "$errfile"
+    if [ -z "$last_err" ]; then last_err="step failed (exit $code)"; fi
+    step_error "$id" "$last_err"
+    exit "$code"
+  fi
+}
+
+group_prepare() {
+  ensure_dirs
+  ensure_git
+}
+group_toolchain() {
+  ensure_bun
+  ensure_pnpm
+}
+group_install() {
+  ensure_remote
+  ensure_deps_installed
+}
+group_wire() {
+  ensure_tsconfig_local
+  ensure_kernel_manifest_registered
+  ensure_zen_shim
+  ensure_path_wired
+  ensure_db_config
+  ensure_app_path
+}
+group_types() {
+  ensure_registry_types
 }
 
 # ---------- main ----------
 
 cd "$REPO_DIR"
 
-ensure_dirs
-ensure_git
-ensure_bun
-ensure_pnpm
-ensure_remote
-ensure_deps_installed
-ensure_tsconfig_local
-ensure_kernel_manifest_registered
-ensure_zen_shim
-ensure_path_wired
-ensure_registry_types
-ensure_db_config
-ensure_app_path
+run_step prepare   "Checking git"            group_prepare
+run_step toolchain "Installing bun + pnpm"   group_toolchain
+run_step install   "Installing packages"     group_install
+run_step types     "Generating registry"     group_types
+run_step wire      "Wiring environment"      group_wire
 
 printf "\n##ZENBU_STEP:all-done\n"
-printf "Setup complete.\n"

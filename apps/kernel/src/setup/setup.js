@@ -141,7 +141,15 @@ function handleOutput(buffer) {
     if (!line) continue
     if (handleProtocolLine(line)) continue
     appendLog(line)
+    pushRecent(line)
   }
+}
+
+/** Ring buffer of the last N non-protocol log lines, for error surfacing. */
+const recentLog = []
+function pushRecent(line) {
+  recentLog.push(line)
+  if (recentLog.length > 30) recentLog.shift()
 }
 
 function runCommand(cmd, args, cwd) {
@@ -206,7 +214,15 @@ async function run() {
     showSuccess("Setup complete — launching…")
     setTimeout(() => ipcRenderer.send("relaunch"), 800)
   } catch (err) {
-    showError(err && err.message ? err.message : String(err))
+    // If setup.sh already emitted ##ZENBU_STEP:error, the error box is
+    // already showing a useful line. Otherwise, surface the last few log
+    // lines as a best-effort hint.
+    const currentErr = errorEl.textContent
+    if (!currentErr) {
+      const tail = recentLog.slice(-5).join("\n").trim()
+      const baseMsg = err && err.message ? err.message : String(err)
+      showError(tail ? `${baseMsg}\n\n${tail}` : baseMsg)
+    }
   }
 }
 

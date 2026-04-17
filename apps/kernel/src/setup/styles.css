@@ -183,6 +183,10 @@ body {
   color: var(--fg);
   font-size: 12px;
   line-height: 1.5;
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  max-height: 120px;
+  overflow-y: auto;
 }
 
 .error-box code {
