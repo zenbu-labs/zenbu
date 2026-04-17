@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Move Zenbu to Applications</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="chrome"></div>
+  <div class="container">
+    <div class="heading">Move Zenbu to Applications first</div>
+    <div class="subheading">
+      Zenbu is currently running from a DMG mount (read-only). It needs to live
+      in <code>/Applications</code> to install and update itself properly.
+    </div>
+
+    <div class="error-box" style="display:block; margin-top:16px">
+      <strong>What to do:</strong><br />
+      Drag <code>Zenbu.app</code> into your <code>Applications</code> folder,
+      then eject this DMG and launch Zenbu from Applications.
+    </div>
+
+    <div class="footer" style="margin-top:24px">
+      <div></div>
+      <button id="quitBtn">Quit</button>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require("electron")
+    document.getElementById("quitBtn").addEventListener("click", () => {
+      ipcRenderer.send("zenbu:quit")
+    })
+  </script>
+</body>
+</html>

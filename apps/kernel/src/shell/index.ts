@@ -63,6 +63,10 @@ app.whenReady().then(async () => {
       webPreferences: { nodeIntegration: true, contextIsolation: false },
     }
 
+    ipcMain.on("zenbu:quit", () => {
+      app.exit(0)
+    })
+
     if (preflight.runningFromDmg) {
       console.log("[shell] running from DMG, showing move-to-applications screen")
       const win = new BrowserWindow(setupWindowOpts)

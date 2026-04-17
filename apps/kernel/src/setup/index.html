@@ -1,21 +1,30 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Setting Up Zenbu</title>
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
+  <div class="chrome"></div>
   <div class="container">
-    <h1>Setting Up Zenbu</h1>
-    <p class="subtitle">Downloading and installing...</p>
-    <div class="progress-track">
-      <div class="progress-fill" id="progressBar"></div>
+    <div class="heading">Setting up Zenbu</div>
+    <div class="subheading">One-time install — every step is idempotent.</div>
+
+    <div class="steps" id="steps">
+      <!-- steps rendered dynamically -->
     </div>
-    <p class="status" id="status">Starting...</p>
-    <p class="error" id="error" style="display:none"></p>
-    <p class="success" id="success" style="display:none"></p>
+
+    <div class="log" id="log"></div>
+
+    <div class="footer">
+      <div>
+        <div class="error-box" id="error"></div>
+        <div class="success-msg" id="success"></div>
+      </div>
+      <button id="retryBtn" style="display:none">Retry</button>
+    </div>
   </div>
   <script src="./setup.js"></script>
 </body>

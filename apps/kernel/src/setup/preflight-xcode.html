@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Install Xcode Command Line Tools</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="chrome"></div>
+  <div class="container">
+    <div class="heading">Install Xcode Command Line Tools</div>
+    <div class="subheading">
+      Zenbu needs the Apple Command Line Tools (git, bash, make). This is a
+      one-time install from Apple — clicking the button below opens the
+      official macOS installer dialog.
+    </div>
+
+    <div id="idle">
+      <div class="footer" style="margin-top:24px">
+        <div></div>
+        <button id="installBtn">Install Command Line Tools</button>
+      </div>
+    </div>
+
+    <div id="polling" style="display:none; margin-top:24px">
+      <div class="step in-progress">
+        <div class="icon"><div class="spinner"></div></div>
+        <div class="title">Waiting for installer to finish…</div>
+      </div>
+      <div class="subheading" style="margin-top:8px">
+        Follow the prompts in the macOS installer. Zenbu will continue
+        automatically once it's done.
+      </div>
+    </div>
+
+    <div id="done" style="display:none; margin-top:24px">
+      <div class="success-msg" style="display:block">
+        ✓ Xcode Command Line Tools installed. Relaunching…
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require("electron")
+    const idleEl = document.getElementById("idle")
+    const pollingEl = document.getElementById("polling")
+    const doneEl = document.getElementById("done")
+
+    document.getElementById("installBtn").addEventListener("click", async () => {
+      idleEl.style.display = "none"
+      pollingEl.style.display = "block"
+      ipcRenderer.send("zenbu:trigger-xcode-install")
+      // Poll every 2s until xcode-select -p returns a path
+      const poll = async () => {
+        const res = await ipcRenderer.invoke("zenbu:poll-xcode")
+        if (res && res.installed) {
+          pollingEl.style.display = "none"
+          doneEl.style.display = "block"
+          setTimeout(() => ipcRenderer.send("zenbu:xcode-ready-relaunch"), 1000)
+          return
+        }
+        setTimeout(poll, 2000)
+      }
+      setTimeout(poll, 2000)
+    })
+  </script>
+</body>
+</html>
