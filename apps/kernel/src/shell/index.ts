@@ -6,6 +6,8 @@ import { register as registerLoader } from "node:module"
 import { app, BaseWindow, BrowserWindow, dialog, ipcMain } from "electron"
 import { readConfig, addPlugin, CONFIG_PATH } from "./config"
 import { initUpdater } from "./updater"
+import { bootstrapEnv } from "./env-bootstrap"
+import { detectPreflight, triggerXcodeCliInstall } from "./preflight"
 
 const PLUGINS_DIR = path.join(os.homedir(), ".zenbu", "plugins")
 const KERNEL_MANIFEST = "packages/init/zenbu.plugin.json"
@@ -44,15 +46,46 @@ app.whenReady().then(async () => {
   try {
     console.log("[shell] app ready")
 
-    if (needsBootstrapper()) {
-      console.log("[shell] needs setup, showing bootstrapper")
-      const win = new BrowserWindow({
-        width: 600,
-        height: 400,
-        titleBarStyle: "hidden",
-        trafficLightPosition: { x: 12, y: 12 },
-        webPreferences: { nodeIntegration: true, contextIsolation: false },
+    const bootstrap = bootstrapEnv()
+    console.log("[shell] env bootstrapped", {
+      cacheRoot: bootstrap.paths.cacheRoot,
+      needsToolchainDownload: bootstrap.needsToolchainDownload,
+    })
+
+    const preflight = detectPreflight()
+    console.log("[shell] preflight:", preflight)
+
+    const setupWindowOpts = {
+      width: 640,
+      height: 460,
+      titleBarStyle: "hidden" as const,
+      trafficLightPosition: { x: 12, y: 12 },
+      webPreferences: { nodeIntegration: true, contextIsolation: false },
+    }
+
+    if (preflight.runningFromDmg) {
+      console.log("[shell] running from DMG, showing move-to-applications screen")
+      const win = new BrowserWindow(setupWindowOpts)
+      win.loadFile(path.join(app.getAppPath(), "src/setup/preflight-dmg.html"))
+      return
+    }
+
+    if (!preflight.xcodeCliInstalled) {
+      console.log("[shell] xcode CLI tools missing, showing install screen")
+      const win = new BrowserWindow(setupWindowOpts)
+      win.loadFile(path.join(app.getAppPath(), "src/setup/preflight-xcode.html"))
+      ipcMain.once("zenbu:trigger-xcode-install", () => triggerXcodeCliInstall())
+      ipcMain.handle("zenbu:poll-xcode", () => {
+        const p = detectPreflight()
+        return { installed: p.xcodeCliInstalled, developerDir: p.xcodeDeveloperDir }
       })
+      ipcMain.once("zenbu:xcode-ready-relaunch", () => { app.relaunch(); app.exit() })
+      return
+    }
+
+    if (needsBootstrapper() || bootstrap.needsToolchainDownload) {
+      console.log("[shell] needs setup, showing bootstrapper")
+      const win = new BrowserWindow(setupWindowOpts)
       win.loadFile(path.join(app.getAppPath(), "src/setup/index.html"))
       ipcMain.on("relaunch", () => { app.relaunch(); app.exit() })
       return
