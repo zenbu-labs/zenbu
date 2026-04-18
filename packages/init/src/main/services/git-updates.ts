@@ -440,9 +440,11 @@ export class GitUpdatesService extends Service {
    * Streams setup subprocess output live via `rpc.emit.setup.progress` so the
    * UI can render the log in real time.
    *
-   * Returns `requiresRelaunch: true` when pnpm-lock.yaml changed during the
-   * setup run — node_modules can't hot-reload cleanly in the current electron
-   * process, so the UI should surface a Relaunch button.
+   * Returns `requiresRelaunch: true` when `pnpm-lock.yaml` changed at ANY
+   * point during the pull+setup cycle (so both "commit bumped a dep" and
+   * "setup.ts mutated deps" cases trigger a relaunch prompt). Captures the
+   * lockfile hash BEFORE `git pull` so a pull that advances the lockfile is
+   * included in the diff even when setup.ts itself doesn't modify it.
    */
   async pullAndInstall(
     opts: PullAndInstallOpts = {},
@@ -459,6 +461,11 @@ export class GitUpdatesService extends Service {
       }
     }
     const repoDir = resolvePluginRepoDir(manifestPath, pluginName)
+    const lockPath = path.join(repoDir, "pnpm-lock.yaml")
+    // Snapshot the lockfile BEFORE pulling so a dep-bump commit is part of
+    // the relaunch-required diff even if setup.ts itself doesn't modify the
+    // lockfile (it just consumes it via pnpm install).
+    const lockPrePull = sha256File(lockPath)
 
     // --- Pull ---
 
@@ -532,9 +539,6 @@ export class GitUpdatesService extends Service {
       }
     }
 
-    const lockPath = path.join(repoDir, "pnpm-lock.yaml")
-    const lockBefore = sha256File(lockPath)
-
     try {
       await this._runSetupScript({
         pluginName,
@@ -564,7 +568,7 @@ export class GitUpdatesService extends Service {
     }
 
     const lockAfter = sha256File(lockPath)
-    const requiresRelaunch = lockBefore !== lockAfter
+    const requiresRelaunch = lockPrePull !== lockAfter
 
     return {
       ok: true,

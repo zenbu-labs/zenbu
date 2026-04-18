@@ -334,8 +334,12 @@ async function ensureTsconfigLocal(): Promise<void> {
             "@testbu/*": [`${packagesDir}/*`],
             "#registry/*": [`${REGISTRY_DIR}/*`],
           },
+          // setup.ts uses Bun-specific APIs (`Bun.*`, `$`) alongside the
+          // normal Node types the rest of the package relies on. Both type
+          // packages must be explicitly listed so the LSP resolves them.
+          types: ["node", "bun"],
         },
-        include: ["src", "shared", "test", REGISTRY_DIR],
+        include: ["src", "shared", "test", "setup.ts", REGISTRY_DIR],
       },
       null,
       2,
