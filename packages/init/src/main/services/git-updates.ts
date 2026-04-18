@@ -23,11 +23,14 @@ import {
   pull as gitPull,
   push as gitPush,
   resolveRef,
+  runGit,
   type Branch,
   type Commit,
   type WorkingTreeStatus,
   type Worktree,
 } from "@zenbu/git"
+import fs from "node:fs"
+import { spawn } from "node:child_process"
 import { Service, runtime } from "../runtime"
 
 const CORE_REPO_ROOT = path.join(os.homedir(), ".zenbu", "plugins", "zenbu")
@@ -77,6 +80,34 @@ export type MutationResult =
   | { ok: true; sha?: string; message?: string; url?: string }
   | { ok: false; error: string }
 
+export type FileDiff =
+  | { kind: "ok"; oldText: string; newText: string; binary: boolean }
+  | { kind: "error"; message: string }
+
+const BINARY_PROBE_BYTES = 8000
+const MAX_DIFF_BYTES = 2 * 1024 * 1024
+
+function runRepoSetup(cwd: string): Promise<void> {
+  const script = path.join(cwd, "setup.sh")
+  if (!fs.existsSync(script)) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const proc = spawn("bash", [script], {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, FORCE_COLOR: "0" },
+    })
+    let stderr = ""
+    proc.stderr.on("data", (d: Buffer) => {
+      stderr += d.toString()
+    })
+    proc.on("error", reject)
+    proc.on("close", (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(`setup.sh exited ${code}: ${stderr.trim()}`))
+    })
+  })
+}
+
 export class GitUpdatesService extends Service {
   static key = "gitUpdates"
   static deps = {}
@@ -93,6 +124,81 @@ export class GitUpdatesService extends Service {
 
   async getCachedStatus(): Promise<UpdateStatus | null> {
     return this.cache
+  }
+
+  async getDiffSummary(opts: {
+    paths?: string[]
+  } = {}): Promise<Record<string, { additions: number; deletions: number; binary: boolean }>> {
+    const cwd = CORE_REPO_ROOT
+    const out: Record<string, { additions: number; deletions: number; binary: boolean }> = {}
+    try {
+      if (!(await isRepo(cwd))) return out
+      const result = await runGit(cwd, ["diff", "--numstat", "HEAD"])
+      if (result.code === 0) {
+        for (const raw of result.stdout.split("\n")) {
+          const line = raw.trim()
+          if (!line) continue
+          const parts = line.split("\t")
+          if (parts.length < 3) continue
+          const [addStr, delStr, ...rest] = parts
+          const path = rest.join("\t")
+          if (!path) continue
+          const binary = addStr === "-" && delStr === "-"
+          out[path] = {
+            additions: binary ? 0 : Number(addStr) || 0,
+            deletions: binary ? 0 : Number(delStr) || 0,
+            binary,
+          }
+        }
+      }
+      const targets = opts.paths && opts.paths.length > 0 ? opts.paths : null
+      if (targets) {
+        for (const p of targets) {
+          if (p in out) continue
+          try {
+            const abs = path.join(cwd, p)
+            const stat = await fs.promises.stat(abs)
+            if (stat.size > MAX_DIFF_BYTES) {
+              out[p] = { additions: 0, deletions: 0, binary: false }
+              continue
+            }
+            const text = await fs.promises.readFile(abs, "utf8")
+            if (looksBinary(text)) {
+              out[p] = { additions: 0, deletions: 0, binary: true }
+            } else {
+              const lineCount = text === "" ? 0 : text.split("\n").filter((_, i, a) => i < a.length - 1 || a[i] !== "").length
+              out[p] = { additions: lineCount, deletions: 0, binary: false }
+            }
+          } catch {
+            out[p] = { additions: 0, deletions: 0, binary: false }
+          }
+        }
+      }
+    } catch {
+      // return what we have
+    }
+    return out
+  }
+
+  async getFileDiff(opts: { path: string; oldPath?: string | null }): Promise<FileDiff> {
+    const cwd = CORE_REPO_ROOT
+    const newPath = opts.path
+    const oldPath = opts.oldPath ?? opts.path
+    if (!newPath) return { kind: "error", message: "Path is required" }
+    try {
+      if (!(await isRepo(cwd))) return { kind: "error", message: "Not a git repo" }
+      const [oldText, newText] = await Promise.all([
+        readFromHead(cwd, oldPath),
+        readFromWorktree(cwd, newPath),
+      ])
+      const binary = looksBinary(oldText) || looksBinary(newText)
+      if (binary) return { kind: "ok", oldText: "", newText: "", binary: true }
+      return { kind: "ok", oldText, newText, binary: false }
+    } catch (err) {
+      if (err instanceof GitMissingError) return { kind: "error", message: "git missing" }
+      const message = err instanceof Error ? err.message : String(err)
+      return { kind: "error", message }
+    }
   }
 
   async getOverview(): Promise<GitOverview> {
@@ -260,6 +366,34 @@ export class GitUpdatesService extends Service {
     }
   }
 
+  /**
+   * Pull upstream changes and then run the core repo's setup.sh idempotently
+   * so any new dependencies / plugin install steps land. Returns whether any
+   * commits were actually pulled so the UI can show a transient state.
+   */
+  async pullAndInstall(): Promise<
+    | { ok: true; updated: boolean }
+    | { ok: false; error: string }
+  > {
+    try {
+      const branch = await getBranch(CORE_REPO_ROOT)
+      if (!branch) return { ok: false, error: "Not on a branch" }
+      const headBefore = await resolveRef(CORE_REPO_ROOT, "HEAD")
+      await gitPull(CORE_REPO_ROOT, { ffOnly: true, remote: "origin", branch })
+      const headAfter = await resolveRef(CORE_REPO_ROOT, "HEAD")
+      const updated = headBefore !== headAfter
+      this._invalidateCache()
+      try {
+        await runRepoSetup(CORE_REPO_ROOT)
+      } catch (err) {
+        return { ok: false, error: `setup.sh failed: ${formatError(err)}` }
+      }
+      return { ok: true, updated }
+    } catch (err) {
+      return { ok: false, error: formatError(err) }
+    }
+  }
+
   async commitChanges(opts: { message: string }): Promise<MutationResult> {
     try {
       const msg = opts.message?.trim()
@@ -372,6 +506,37 @@ function formatError(err: unknown): string {
   }
   if (err instanceof Error) return err.message
   return String(err)
+}
+
+async function readFromHead(cwd: string, relPath: string): Promise<string> {
+  const result = await runGit(cwd, ["show", `HEAD:${relPath}`])
+  if (result.code !== 0) {
+    // File didn't exist at HEAD (added/untracked) → empty.
+    return ""
+  }
+  if (result.stdout.length > MAX_DIFF_BYTES) {
+    throw new Error(`File too large to diff (${result.stdout.length} bytes)`)
+  }
+  return result.stdout
+}
+
+async function readFromWorktree(cwd: string, relPath: string): Promise<string> {
+  const abs = path.join(cwd, relPath)
+  try {
+    const stat = await fs.promises.stat(abs)
+    if (stat.size > MAX_DIFF_BYTES) {
+      throw new Error(`File too large to diff (${stat.size} bytes)`)
+    }
+    return await fs.promises.readFile(abs, "utf8")
+  } catch (err: any) {
+    if (err?.code === "ENOENT") return ""
+    throw err
+  }
+}
+
+function looksBinary(text: string): boolean {
+  const probe = text.length > BINARY_PROBE_BYTES ? text.slice(0, BINARY_PROBE_BYTES) : text
+  return probe.includes("\u0000")
 }
 
 runtime.register(GitUpdatesService, (import.meta as any).hot)

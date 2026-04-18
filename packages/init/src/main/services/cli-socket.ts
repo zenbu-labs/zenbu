@@ -8,6 +8,7 @@ import { makeCollection } from "@zenbu/kyju/schema";
 import { Service, runtime } from "../runtime";
 import { DbService } from "./db";
 import { INTERNAL_DIR, RUNTIME_JSON, SOCKET_DIR, CLI_SOCKET_PATH } from "../../../shared/paths";
+import { insertHotAgent, type ArchivedAgent } from "../../../shared/agent-ops";
 
 const DB_PATH = path.join(process.cwd(), ".zenbu", "db");
 const DEFAULT_CWD = path.join(os.homedir(), ".zenbu");
@@ -63,7 +64,7 @@ export class CliSocketService extends Service {
 
     if (cmd.cmd === "list-agents") {
       const kernel = this.ctx.db.client.readRoot().plugin.kernel;
-      const agents = (kernel.agents ?? []).map((a) => ({
+      const agents = kernel.agents.map((a) => ({
         id: a.id,
         name: a.name,
         configId: a.configId,
@@ -80,8 +81,7 @@ export class CliSocketService extends Service {
       let agentId = cmd.agentId;
 
       if (!agentId && cmd.agent) {
-        const configs = kernel.agentConfigs ?? [];
-        const matched = matchAgentConfig(configs, cmd.agent);
+        const matched = matchAgentConfig(kernel.agentConfigs, cmd.agent);
         if (!matched) {
           return { error: `No agent config matching "${cmd.agent}"` };
         }
@@ -89,49 +89,67 @@ export class CliSocketService extends Service {
         agentId = nanoid();
         const sessionId = nanoid();
 
+        let evicted: ArchivedAgent[] = [];
         Effect.runPromise(
           client.update((root) => {
             const k = root.plugin.kernel;
 
-            k.agents = [
-              ...(k.agents ?? []),
-              {
-                id: agentId!,
-                name: matched!.name,
-                startCommand: matched!.startCommand,
-                configId: matched!.id,
-                status: "idle" as const,
-                metadata: { cwd: cmd.cwd ?? DEFAULT_CWD },
-                eventLog: makeCollection({ collectionId: nanoid(), debugName: "eventLog" }),
-                title: {kind: "not-available"}
-              },
-            ];
+            evicted = insertHotAgent(k, {
+              id: agentId!,
+              name: matched.name,
+              startCommand: matched.startCommand,
+              configId: matched.id,
+              status: "idle",
+              metadata: { cwd: cmd.cwd ?? DEFAULT_CWD },
+              eventLog: makeCollection({
+                collectionId: nanoid(),
+                debugName: "eventLog",
+              }),
+              title: { kind: "not-available" },
+              reloadMode: "keep-alive",
+              sessionId: null,
+              firstPromptSentAt: null,
+              createdAt: Date.now(),
+            });
 
             k.windowStates = [
-              ...(k.windowStates ?? []),
+              ...k.windowStates,
               {
                 id: windowId,
-                sessions: [{ id: sessionId, agentId: agentId!,lastViewedAt: null }],
+                sessions: [
+                  { id: sessionId, agentId: agentId!, lastViewedAt: null },
+                ],
                 panes: [],
                 rootPaneId: null,
                 focusedPaneId: null,
                 sidebarOpen: false,
                 tabSidebarOpen: true,
                 sidebarPanel: "overview",
-
               },
             ];
           }),
-        ).catch((err) => console.error("[cli-socket] DB update failed:", err));
+        )
+          .then(async () => {
+            if (evicted.length > 0) {
+              await Effect.runPromise(
+                client.plugin.kernel.archivedAgents.concat(evicted),
+              ).catch(() => {});
+            }
+          })
+          .catch((err) =>
+            console.error("[cli-socket] DB update failed:", err),
+          );
       } else if (agentId) {
         const sessionId = nanoid();
         Effect.runPromise(
           client.update((root) => {
             root.plugin.kernel.windowStates = [
-              ...(root.plugin.kernel.windowStates ?? []),
+              ...root.plugin.kernel.windowStates,
               {
                 id: windowId,
-                sessions: [{ id: sessionId, agentId: agentId!,lastViewedAt :null }],
+                sessions: [
+                  { id: sessionId, agentId: agentId!, lastViewedAt: null },
+                ],
                 panes: [],
                 rootPaneId: null,
                 focusedPaneId: null,
@@ -146,7 +164,7 @@ export class CliSocketService extends Service {
         Effect.runPromise(
           client.update((root) => {
             root.plugin.kernel.windowStates = [
-              ...(root.plugin.kernel.windowStates ?? []),
+              ...root.plugin.kernel.windowStates,
               {
                 id: windowId,
                 sessions: [],

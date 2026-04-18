@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import { makeCollection } from "@zenbu/kyju/schema";
 import { Service, runtime } from "../runtime";
 import { DbService } from "./db";
+import { insertHotAgent, type ArchivedAgent } from "../../../shared/agent-ops";
 
 const DEFAULT_CWD = path.join(os.homedir(), ".zenbu");
 
@@ -61,8 +62,7 @@ export class CliIntentService extends Service {
     let fallbackToNewAgent = false;
     if (!agent && !existingAgentId && !cwd) {
       const kernel = client.readRoot().plugin.kernel;
-      const agents = kernel.agents ?? [];
-      const lastAgent = [...agents]
+      const lastAgent = kernel.agents
         .filter((a) => a.lastUserMessageAt != null)
         .sort(
           (a, b) => (b.lastUserMessageAt ?? 0) - (a.lastUserMessageAt ?? 0),
@@ -74,24 +74,35 @@ export class CliIntentService extends Service {
       }
     }
 
+    let evicted: ArchivedAgent[] = [];
+
     Effect.runPromise(
       client.update((root) => {
         const kernel = root.plugin.kernel;
 
         if (existingAgentId) {
-          const existingAgent = (kernel.agents ?? []).find((a) => a.id === existingAgentId);
+          const existingAgent = kernel.agents.find(
+            (a) => a.id === existingAgentId,
+          );
           if (!existingAgent) {
             console.warn(`[cli-intent] No agent with id "${existingAgentId}"`);
             return;
           }
 
           const sessionId = nanoid();
-          const firstWindowId = [...this.ctx.baseWindow.windows.keys()][0] ?? nanoid();
+          const firstWindowId =
+            [...this.ctx.baseWindow.windows.keys()][0] ?? nanoid();
           kernel.windowStates = [
-            ...(kernel.windowStates ?? []),
+            ...kernel.windowStates,
             {
               id: firstWindowId,
-              sessions: [{ id: sessionId, agentId: existingAgentId ,lastViewedAt: null}],
+              sessions: [
+                {
+                  id: sessionId,
+                  agentId: existingAgentId,
+                  lastViewedAt: null,
+                },
+              ],
               panes: [],
               rootPaneId: null,
               focusedPaneId: null,
@@ -101,13 +112,14 @@ export class CliIntentService extends Service {
             },
           ];
         } else if (agent || fallbackToNewAgent) {
-          const configs = kernel.agentConfigs ?? [];
           const matched = agent
-            ? matchAgentConfig(configs, agent)
-            : configs.find((c) => c.id === kernel.selectedConfigId) ?? configs[0];
+            ? matchAgentConfig(kernel.agentConfigs, agent)
+            : kernel.agentConfigs.find(
+                (c) => c.id === kernel.selectedConfigId,
+              ) ?? kernel.agentConfigs[0];
           if (!matched) {
             if (agent) {
-              const names = configs.map((c) => c.name).join(", ");
+              const names = kernel.agentConfigs.map((c) => c.name).join(", ");
               console.warn(
                 `[cli-intent] No agent config matching "${agent}". Available: ${names || "(none)"}`,
               );
@@ -123,26 +135,31 @@ export class CliIntentService extends Service {
 
           const agentId = nanoid();
           const sessionId = nanoid();
-          kernel.agents = [
-            ...(kernel.agents ?? []),
-            {
-              id: agentId,
-              name: matched.name,
-              startCommand: matched.startCommand,
-              configId: matched.id,
-              status: "idle" as const,
-              metadata: { cwd: cwd ?? DEFAULT_CWD },
-              eventLog: makeCollection({ collectionId: nanoid(), debugName: "eventLog" }),
-              title: {kind :"not-available"}
-            },
-          ];
+          evicted = insertHotAgent(kernel, {
+            id: agentId,
+            name: matched.name,
+            startCommand: matched.startCommand,
+            configId: matched.id,
+            status: "idle",
+            metadata: { cwd: cwd ?? DEFAULT_CWD },
+            eventLog: makeCollection({
+              collectionId: nanoid(),
+              debugName: "eventLog",
+            }),
+            title: { kind: "not-available" },
+            reloadMode: "keep-alive",
+            sessionId: null,
+            firstPromptSentAt: null,
+            createdAt: Date.now(),
+          });
 
-          const firstWindowId = [...this.ctx.baseWindow.windows.keys()][0] ?? nanoid();
+          const firstWindowId =
+            [...this.ctx.baseWindow.windows.keys()][0] ?? nanoid();
           kernel.windowStates = [
-            ...(kernel.windowStates ?? []),
+            ...kernel.windowStates,
             {
               id: firstWindowId,
-              sessions: [{ id: sessionId, agentId,lastViewedAt: null }],
+              sessions: [{ id: sessionId, agentId, lastViewedAt: null }],
               panes: [],
               rootPaneId: null,
               focusedPaneId: null,
@@ -153,9 +170,17 @@ export class CliIntentService extends Service {
           ];
         }
       }),
-    ).catch((err) => {
-      console.error("[cli-intent] Failed to apply CLI intent:", err);
-    });
+    )
+      .then(async () => {
+        if (evicted.length > 0) {
+          await Effect.runPromise(
+            client.plugin.kernel.archivedAgents.concat(evicted),
+          ).catch(() => {});
+        }
+      })
+      .catch((err) => {
+        console.error("[cli-intent] Failed to apply CLI intent:", err);
+      });
 
     console.log(
       `[cli-intent] applied${agent ? ` agent=${agent}` : ""}${existingAgentId ? ` agentId=${existingAgentId}` : ""}${cwd ? ` cwd=${cwd}` : ""}${fallbackToNewAgent ? " (fallback: new agent)" : ""}`,

@@ -6,8 +6,9 @@ import { MessageList } from "./MessageList"
 
 export function MinimapContent({ agentId }: { agentId: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const agents = useDb((root) => root.plugin.kernel.agents)
-  const agent = agents?.find((a) => a.id === agentId)
+  const agent = useDb((root) =>
+    root.plugin.kernel.agents.find((a) => a.id === agentId),
+  )
   const streaming = agent?.status === "streaming"
   const { items: events } = useCollection(agent?.eventLog)
   const messages = useMemo(() => materializeMessages(events), [events])

@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PencilLineIcon } from "lucide-react";
 import { useCollection, useDb } from "../../../lib/kyju-react";
 import { useRpc } from "../../../lib/providers";
+import { useShortcutIframeRegistry } from "../providers/shortcut-forwarder";
+import { useFocusOnRequest } from "../../../lib/focus-request";
 import type { PaneNode } from "../pane-ops";
 import type { SchemaRoot } from "../../../../../shared/schema";
 
 type SessionItem = SchemaRoot["windowStates"][number]["sessions"][number];
-type AgentItem = SchemaRoot["agents"][number];
+type AgentItem = SchemaRoot["agents"][string];
 
 function useAgentEvents(agent: AgentItem | undefined) {
   const { items: events } = useCollection(agent?.eventLog);
@@ -302,6 +304,7 @@ export function LeafPane({
   sessions,
   registryMap,
   wsPort,
+  windowId,
   onSwitchTab,
   onCloseTab,
   onCloseTabQuiet,
@@ -314,6 +317,7 @@ export function LeafPane({
   sessions: SessionItem[];
   registryMap: Map<string, { scope: string; url: string; port: number }>;
   wsPort: number;
+  windowId: string;
   onSwitchTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onCloseTabQuiet: (tabId: string) => void;
@@ -329,6 +333,24 @@ export function LeafPane({
   const showHeader = pane.tabIds.length > 1;
   const tabRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
+  const shortcutIframes = useShortcutIframeRegistry();
+
+  useEffect(() => {
+    return () => {
+      for (const tabId of iframeRefs.current.keys()) {
+        shortcutIframes.unregister(tabId);
+      }
+    };
+  }, [shortcutIframes]);
+
+  const activeTabIdForFocus = pane.activeTabId;
+  useFocusOnRequest("active-view", () => {
+    if (!activeTabIdForFocus) return;
+    const iframe = iframeRefs.current.get(activeTabIdForFocus);
+    iframe?.focus();
+    // Also nudge focus into the iframe's document so keydowns route there.
+    iframe?.contentWindow?.focus();
+  });
 
   const [visitedTabIds, setVisitedTabIds] = useState<Set<string>>(new Set());
 
@@ -422,8 +444,13 @@ export function LeafPane({
                   if (el) iframeRefs.current.set(tabId, el);
                   else iframeRefs.current.delete(tabId);
                 }}
+                onLoad={(e) => {
+                  const win = (e.currentTarget as HTMLIFrameElement)
+                    .contentWindow;
+                  if (win) shortcutIframes.register(tabId, win);
+                }}
                 // src={`${chatEntry.url}/index.html?agentId=${agentId}&wsPort=${wsPort}`}
-                src={`http://${hostname}.localhost:${wsPort}${chatPath}/index.html?agentId=${agentId}&wsPort=${wsPort}`}
+                src={`http://${hostname}.localhost:${wsPort}${chatPath}/index.html?agentId=${agentId}&wsPort=${wsPort}&windowId=${encodeURIComponent(windowId)}&paneId=${encodeURIComponent(pane.id)}`}
                 className="border-none"
                 style={{
                   position: "absolute",

@@ -1,0 +1,185 @@
+{
+  "id": "73685bd1-4d24-44f6-94c2-01eb934c938d",
+  "prevId": "fca590e8-11bf-4144-bb11-7f5996660564",
+  "fields": {
+    "agentConfigs": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "7e9e42f066b590b4",
+      "default": [
+        {
+          "id": "codex",
+          "name": "codex",
+          "startCommand": "$ZENBU_BUN $HOME/.zenbu/plugins/zenbu/packages/codex-acp/src/index.ts",
+          "availableModels": [],
+          "availableThinkingLevels": [],
+          "availableModes": []
+        },
+        {
+          "id": "claude",
+          "name": "claude",
+          "startCommand": "$ZENBU_BUN $HOME/.zenbu/plugins/zenbu/packages/claude-acp/src/index.ts",
+          "availableModels": [],
+          "availableThinkingLevels": [],
+          "availableModes": []
+        }
+      ]
+    },
+    "agents": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "16f44d0dcf0c065d",
+      "default": []
+    },
+    "skillRoots": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "e2c7a0c35cb2fd9d",
+      "default": []
+    },
+    "selectedConfigId": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": "claude"
+    },
+    "summarizationAgentConfigId": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "12539628f53a3f78",
+      "default": null
+    },
+    "summarizationModel": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "12539628f53a3f78",
+      "default": null
+    },
+    "acpSessions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "543a2197adc75660",
+      "default": {}
+    },
+    "sessions": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "f800dd2720707f96",
+      "default": []
+    },
+    "orchestratorViewPath": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": "/views/orchestrator/index.html"
+    },
+    "sidebarOpen": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "7cb541e84f226754",
+      "default": false
+    },
+    "tabSidebarOpen": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "7cb541e84f226754",
+      "default": true
+    },
+    "sidebarPanel": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": "overview"
+    },
+    "viewRegistry": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "1e31f50e9c6abd70",
+      "default": []
+    },
+    "views": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "66ddd94dc5c72abc",
+      "default": []
+    },
+    "panes": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "f67f364550117691",
+      "default": []
+    },
+    "rootPaneId": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": ""
+    },
+    "focusedPaneId": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": ""
+    },
+    "commands": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "0fa6844b1a83162b",
+      "default": []
+    },
+    "chatBlobs": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "3249af5c01c8185c",
+      "default": []
+    },
+    "composerDrafts": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "4cf250d56ea5e949",
+      "default": {}
+    },
+    "windowStates": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "c9f824a590ba57d5",
+      "default": []
+    },
+    "majorMode": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "00404e686415370f",
+      "default": "fundamental-mode"
+    },
+    "minorModes": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "e2c7a0c35cb2fd9d",
+      "default": []
+    },
+    "focusedWindowId": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "12539628f53a3f78",
+      "default": null
+    },
+    "shortcutRegistry": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "d5a3eb43ae014437",
+      "default": []
+    },
+    "shortcutOverrides": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "543a2197adc75660",
+      "default": {}
+    },
+    "shortcutDisabled": {
+      "kind": "data",
+      "hasDefault": true,
+      "typeHash": "e2c7a0c35cb2fd9d",
+      "default": []
+    }
+  }
+}

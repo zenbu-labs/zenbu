@@ -115,6 +115,26 @@
       "idx": 22,
       "tag": "add_view_registry_meta",
       "when": 1776470706871
+    },
+    {
+      "idx": 23,
+      "tag": "add_shortcuts",
+      "when": 1776494847947
+    },
+    {
+      "idx": 24,
+      "tag": "add_skills_fields",
+      "when": 1776495573665
+    },
+    {
+      "idx": 25,
+      "tag": "add_focus_request",
+      "when": 1776496692534
+    },
+    {
+      "idx": 26,
+      "tag": "agents_hot_archive",
+      "when": 1776500158129
     }
   ]
 }

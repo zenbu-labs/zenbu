@@ -21,6 +21,7 @@ import { HttpService } from "./http";
 import { ReloaderService } from "./reloader";
 import { RpcService } from "./rpc";
 import { registerAdvice, registerContentScript } from "./advice-config";
+import { insertHotAgent, type ArchivedAgent } from "../../../shared/agent-ops";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -63,39 +64,38 @@ export class WindowService extends Service {
     const { baseWindow, db } = this.ctx;
     const client = db.client;
     const kernel = client.readRoot().plugin.kernel;
-    const configs = kernel.agentConfigs ?? [];
-    const selectedConfigId = kernel.selectedConfigId;
     const selectedConfig =
-      configs.find((c) => c.id === selectedConfigId) ?? configs[0];
+      kernel.agentConfigs.find((c) => c.id === kernel.selectedConfigId) ??
+      kernel.agentConfigs[0];
     if (!selectedConfig) return { windowId: "", agentId: "" };
 
     const windowId = nanoid();
     const agentId = nanoid();
     const sessionId = nanoid();
-    //
+
+    let evicted: ArchivedAgent[] = [];
     await Effect.runPromise(
       client.update((root) => {
         const k = root.plugin.kernel;
-        k.agents = [
-          ...(k.agents ?? []),
-          {
-            id: agentId,
-            name: selectedConfig.name,
-            startCommand: selectedConfig.startCommand,
-            configId: selectedConfig.id,
-            status: "idle" as const,
-            metadata: { cwd: DEFAULT_CWD },
-            eventLog: makeCollection({
-              collectionId: nanoid(),
-              debugName: "eventLog",
-            }),
-            title: {
-              kind: "not-available", // er
-            },
-          },
-        ];
+        evicted = insertHotAgent(k, {
+          id: agentId,
+          name: selectedConfig.name,
+          startCommand: selectedConfig.startCommand,
+          configId: selectedConfig.id,
+          status: "idle",
+          metadata: { cwd: DEFAULT_CWD },
+          eventLog: makeCollection({
+            collectionId: nanoid(),
+            debugName: "eventLog",
+          }),
+          title: { kind: "not-available" },
+          reloadMode: "keep-alive",
+          sessionId: null,
+          firstPromptSentAt: null,
+          createdAt: Date.now(),
+        });
         k.windowStates = [
-          ...(k.windowStates ?? []),
+          ...k.windowStates,
           {
             id: windowId,
             sessions: [{ id: sessionId, agentId, lastViewedAt: null }],
@@ -109,6 +109,11 @@ export class WindowService extends Service {
         ];
       }),
     );
+    if (evicted.length > 0) {
+      await Effect.runPromise(
+        client.plugin.kernel.archivedAgents.concat(evicted),
+      ).catch(() => {});
+    }
 
     baseWindow.createWindow({ windowId });
     this._mountNewWindows?.();
@@ -119,8 +124,7 @@ export class WindowService extends Service {
     const { baseWindow, db } = this.ctx;
     const client = db.client;
     const kernel = client.readRoot().plugin.kernel;
-    const agents = kernel.agents ?? [];
-    const lastAgent = [...agents]
+    const lastAgent = kernel.agents
       .filter((a) => a.lastUserMessageAt != null)
       .sort(
         (a, b) => (b.lastUserMessageAt ?? 0) - (a.lastUserMessageAt ?? 0),
@@ -133,7 +137,7 @@ export class WindowService extends Service {
     await Effect.runPromise(
       client.update((root) => {
         root.plugin.kernel.windowStates = [
-          ...(root.plugin.kernel.windowStates ?? []),
+          ...root.plugin.kernel.windowStates,
           {
             id: windowId,
             sessions: [
@@ -854,6 +858,68 @@ export class WindowService extends Service {
       app.on("activate", handler);
       return () => {
         app.off("activate", handler);
+      };
+    });
+
+    this.effect("focused-window-tracking", () => {
+      const tracked = new Map<
+        Electron.BaseWindow,
+        { windowId: string; onFocus: () => void; onBlur: () => void }
+      >();
+
+      const writeFocusedWindowId = (id: string | null) => {
+        Effect.runPromise(
+          db.client.update((root) => {
+            if (root.plugin.kernel.focusedWindowId !== id) {
+              root.plugin.kernel.focusedWindowId = id;
+            }
+          }),
+        ).catch(() => {});
+      };
+
+      const attachIfNew = (windowId: string, win: Electron.BaseWindow) => {
+        if (tracked.has(win)) return;
+        const onFocus = () => writeFocusedWindowId(windowId);
+        const onBlur = () => {
+          // Only clear if no other window immediately takes focus. Electron
+          // delivers focus on the new window synchronously after blur, so a
+          // microtask is enough to debounce.
+          queueMicrotask(() => {
+            const anyFocused = [...baseWindow.windows.values()].some(
+              (w: Electron.BaseWindow) => !w.isDestroyed() && w.isFocused(),
+            );
+            if (!anyFocused) writeFocusedWindowId(null);
+          });
+        };
+        win.on("focus", onFocus);
+        win.on("blur", onBlur);
+        tracked.set(win, { windowId, onFocus, onBlur });
+        if (win.isFocused()) writeFocusedWindowId(windowId);
+      };
+
+      const sweep = () => {
+        for (const [windowId, win] of baseWindow.windows) {
+          attachIfNew(windowId, win);
+        }
+        for (const [win, entry] of tracked) {
+          if (!baseWindow.windows.get(entry.windowId)) {
+            tracked.delete(win);
+          }
+        }
+      };
+      sweep();
+
+      const interval = setInterval(sweep, 500);
+
+      return () => {
+        clearInterval(interval);
+        for (const [win, { onFocus, onBlur }] of tracked) {
+          try {
+            win.off("focus", onFocus);
+            win.off("blur", onBlur);
+          } catch {}
+        }
+        tracked.clear();
       };
     });
 

@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   TextNode,
   $createTextNode,
@@ -6,128 +12,129 @@ import {
   COMMAND_PRIORITY_CRITICAL,
   PASTE_COMMAND,
   KEY_DOWN_COMMAND,
-} from "lexical"
+} from "lexical";
 import {
   LexicalTypeaheadMenuPlugin,
   MenuOption,
   useBasicTypeaheadTriggerMatch,
-} from "@lexical/react/LexicalTypeaheadMenuPlugin"
-import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext"
+} from "@lexical/react/LexicalTypeaheadMenuPlugin";
+import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
   $createFileReferenceNode,
   $isFileReferenceNode,
-} from "../lib/FileReferenceNode"
-import { FilePickerMenu } from "../components/FilePickerMenu"
-import { useRpc } from "@/lib/providers"
-import { useDb } from "@/lib/kyju-react"
+} from "../lib/FileReferenceNode";
+import { FilePickerMenu } from "../components/FilePickerMenu";
+import { useRpc } from "@/lib/providers";
+import { useDb } from "@/lib/kyju-react";
 
-type FileEntry = { path: string; name: string }
+type FileEntry = { path: string; name: string };
 
 export class FileMenuOption extends MenuOption {
-  data: FileEntry
+  data: FileEntry;
 
   constructor(entry: FileEntry) {
-    super(entry.path)
-    this.data = entry
+    super(entry.path);
+    this.data = entry;
   }
 }
 
 function usePasteSuppression() {
-  const [editor] = useLexicalComposerContext()
-  const justPastedRef = useRef(false)
+  const [editor] = useLexicalComposerContext();
+  const justPastedRef = useRef(false);
 
   useEffect(() => {
     const unregPaste = editor.registerCommand(
       PASTE_COMMAND,
       () => {
-        justPastedRef.current = true
-        return false
+        justPastedRef.current = true;
+        return false;
       },
       COMMAND_PRIORITY_CRITICAL,
-    )
+    );
 
     const unregKey = editor.registerCommand(
       KEY_DOWN_COMMAND,
       () => {
-        justPastedRef.current = false
-        return false
+        justPastedRef.current = false;
+        return false;
       },
       COMMAND_PRIORITY_CRITICAL,
-    )
+    );
 
     return () => {
-      unregPaste()
-      unregKey()
-    }
-  }, [editor])
+      unregPaste();
+      unregKey();
+    };
+  }, [editor]);
 
-  return justPastedRef
+  return justPastedRef;
 }
 
-const MAX_RESULTS = 50
+const MAX_RESULTS = 50;
 
 export function FilePickerPlugin({
   menuOpenRef,
   agentId,
 }: {
-  menuOpenRef: React.RefObject<boolean>
-  agentId: string
+  menuOpenRef: React.RefObject<boolean>;
+  agentId: string;
 }) {
-  const [editor] = useLexicalComposerContext()
-  const rpc = useRpc()
-  const [allFiles, setAllFiles] = useState<FileEntry[]>([])
-  const [query, setQuery] = useState<string | null>(null)
-  const justPastedRef = usePasteSuppression()
+  const [editor] = useLexicalComposerContext();
+  const rpc = useRpc();
+  const [allFiles, setAllFiles] = useState<FileEntry[]>([]);
+  const [query, setQuery] = useState<string | null>(null);
+  const justPastedRef = usePasteSuppression();
 
-  const agents = useDb((root) => root.plugin.kernel.agents)
+  const agent = useDb((root) =>
+    root.plugin.kernel.agents.find((a) => a.id === agentId),
+  );
   const cwd = useMemo(() => {
-    const agent = (agents ?? []).find((a: any) => a.id === agentId)
-    const c = agent?.metadata?.cwd
-    return typeof c === "string" ? c : undefined
-  }, [agents, agentId])
+    const c = agent?.metadata?.cwd;
+    return typeof c === "string" ? c : undefined;
+  }, [agent]);
 
   useEffect(() => {
-    let cancelled = false
+    let cancelled = false;
     rpc["file-scanner"]
       .listFiles(cwd)
       .then((files: FileEntry[]) => {
-        if (!cancelled) setAllFiles(files)
+        if (!cancelled) setAllFiles(files);
       })
-      .catch(() => {})
+      .catch(() => {});
     return () => {
-      cancelled = true
-    }
-  }, [rpc, cwd])
+      cancelled = true;
+    };
+  }, [rpc, cwd]);
 
-  const baseTrigger = useBasicTypeaheadTriggerMatch("@", { minLength: 0 })
+  const baseTrigger = useBasicTypeaheadTriggerMatch("@", { minLength: 0 });
 
   const triggerFn = useCallback(
     (text: string, editorArg: any) => {
-      if (justPastedRef.current) return null
-      return baseTrigger(text, editorArg)
+      if (justPastedRef.current) return null;
+      return baseTrigger(text, editorArg);
     },
     [baseTrigger, justPastedRef],
-  )
+  );
 
   const options = useMemo(() => {
-    if (query === null) return []
-    const q = query.toLowerCase()
+    if (query === null) return [];
+    const q = query.toLowerCase();
     const filtered = q
       ? allFiles.filter(
           (f) =>
             f.path.toLowerCase().includes(q) ||
             f.name.toLowerCase().includes(q),
         )
-      : allFiles
-    return filtered.slice(0, MAX_RESULTS).map((f) => new FileMenuOption(f))
-  }, [query, allFiles])
+      : allFiles;
+    return filtered.slice(0, MAX_RESULTS).map((f) => new FileMenuOption(f));
+  }, [query, allFiles]);
 
   useEffect(() => {
-    menuOpenRef.current = options.length > 0
+    menuOpenRef.current = options.length > 0;
     return () => {
-      menuOpenRef.current = false
-    }
-  }, [options.length, menuOpenRef])
+      menuOpenRef.current = false;
+    };
+  }, [options.length, menuOpenRef]);
 
   const onSelectOption = useCallback(
     (
@@ -136,35 +143,35 @@ export function FilePickerPlugin({
       closeMenu: () => void,
     ) => {
       if (textNode) {
-        const entry = option.data
-        const node = $createFileReferenceNode(entry.path, entry.name, "")
-        const nodeKey = node.getKey()
-        const spaceNode = $createTextNode(" ")
-        textNode.replace(node)
-        node.insertAfter(spaceNode)
-        spaceNode.select()
+        const entry = option.data;
+        const node = $createFileReferenceNode(entry.path, entry.name, "");
+        const nodeKey = node.getKey();
+        const spaceNode = $createTextNode(" ");
+        textNode.replace(node);
+        node.insertAfter(spaceNode);
+        spaceNode.select();
 
         rpc["file-scanner"]
           .readFile(entry.path, cwd)
           .then((content: string) => {
             editor.update(() => {
-              const existing = $getNodeByKey(nodeKey)
+              const existing = $getNodeByKey(nodeKey);
               if ($isFileReferenceNode(existing)) {
                 const updated = $createFileReferenceNode(
                   entry.path,
                   entry.name,
                   content,
-                )
-                existing.replace(updated)
+                );
+                existing.replace(updated);
               }
-            })
+            });
           })
-          .catch(() => {})
+          .catch(() => {});
       }
-      closeMenu()
+      closeMenu();
     },
     [rpc, editor, cwd],
-  )
+  );
 
   return (
     <LexicalTypeaheadMenuPlugin<FileMenuOption>
@@ -190,5 +197,5 @@ export function FilePickerPlugin({
         />
       )}
     />
-  )
+  );
 }

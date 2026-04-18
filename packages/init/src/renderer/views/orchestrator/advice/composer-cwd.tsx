@@ -201,25 +201,19 @@ function ComposerCwdInner({
 }) {
   const rpc = useRpc();
 
-  const agents = useDb((root) => root.plugin.kernel.agents) as
-    | AgentRow[]
-    | undefined;
-  const agentConfigs = useDb((root) => root.plugin.kernel.agentConfigs) as
-    | AgentConfigRow[]
-    | undefined;
-  const agent = useMemo(
-    () => agents?.find((a) => a.id === agentId),
-    [agents, agentId],
+  const agent = useDb((root) =>
+    root.plugin.kernel.agents.find((a) => a.id === agentId),
   );
+  const agentConfigs = useDb((root) => root.plugin.kernel.agentConfigs);
   const { items: events } = useCollection(agent?.eventLog);
   const hasUserMessages = useMemo(
-    () => events.some((e: any) => e.data?.kind === "user_prompt"),
+    () => events.some((e) => e.data?.kind === "user_prompt"),
     [events],
   );
   const usage = useMemo(() => {
     if (!events) return null;
     for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i] as any;
+      const e = events[i] ;
       if (
         e?.data?.kind === "session_update" &&
         e.data.update?.sessionUpdate === "usage_update" &&

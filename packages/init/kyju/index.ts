@@ -21,5 +21,9 @@ import m19 from "./0019_remove_workspaces"
 import m20 from "./0020_default_agents_bun"
 import m21 from "./0021_default_config_claude"
 import m22 from "./0022_add_view_registry_meta"
+import m23 from "./0023_add_shortcuts"
+import m24 from "./0024_add_skills_fields"
+import m25 from "./0025_add_focus_request"
+import m26 from "./0026_agents_hot_archive"
 
-export const migrations = [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22]
+export const migrations = [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26]

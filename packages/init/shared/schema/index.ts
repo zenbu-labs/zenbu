@@ -46,6 +46,33 @@ const windowStateSchema = zod.object({
   sidebarPanel: zod.string().default("overview"),
 });
 
+const agentRecordBase = {
+  id: zod.string(),
+  name: zod.string(),
+  startCommand: zod.string(),
+  configId: zod.string(),
+  status: zod.enum(["idle", "streaming"]).default("idle"),
+  metadata: zod.record(zod.string(), zod.unknown()).optional(),
+  eventLog: f.collection(zod.object(agentEventSchema)),
+  model: zod.string().optional(),
+  thinkingLevel: zod.string().optional(),
+  mode: zod.string().optional(),
+  processState: zod.string().optional(),
+  reloadMode: zod.enum(["continue", "keep-alive"]).default("keep-alive"),
+  title: zod
+    .discriminatedUnion("kind", [
+      zod.object({ kind: zod.literal("not-available") }),
+      zod.object({ kind: zod.literal("generating") }),
+      zod.object({ kind: zod.literal("set"), value: zod.string() }),
+    ])
+    .default({ kind: "not-available" }),
+  lastUserMessageAt: zod.number().optional(),
+  lastFinishedAt: zod.number().optional(),
+  firstPromptSentAt: zod.number().nullable().default(null),
+  sessionId: zod.string().nullable().default(null),
+  createdAt: zod.number(),
+};
+
 export const appSchema = createSchema({
   agentConfigs: f
     .array(
@@ -103,36 +130,16 @@ export const appSchema = createSchema({
         availableModes: [],
       },
     ]),
-  agents: f
-    .array(
-      zod.object({
-        id: zod.string(),
-        name: zod.string(),
-        startCommand: zod.string(),
-        configId: zod.string(),
-        status: zod.enum(["idle", "streaming"]).default("idle"),
-        metadata: zod.record(zod.string(), zod.unknown()).optional(),
-        eventLog: f.collection(zod.object(agentEventSchema)),
-        model: zod.string().optional(),
-        thinkingLevel: zod.string().optional(),
-        mode: zod.string().optional(),
-        processState: zod.string().optional(),
-        title: zod
-          .discriminatedUnion("kind", [
-            zod.object({ kind: zod.literal("not-available") }),
-            zod.object({ kind: zod.literal("generating") }),
-            zod.object({ kind: zod.literal("set"), value: zod.string() }),
-          ])
-          .default({ kind: "not-available" }),
-        lastUserMessageAt: zod.number().optional(),
-        lastFinishedAt: zod.number().optional(),
-      }),
-    )
-    .default([]),
+  agents: f.array(zod.object(agentRecordBase)).default([]),
+  archivedAgents: f.collection(
+    zod.object({ ...agentRecordBase, archivedAt: zod.number() }),
+    { debugName: "archivedAgents" },
+  ),
+  hotAgentsCap: f.number().default(100),
+  skillRoots: f.array(zod.string()).default([]),
   selectedConfigId: f.string().default("claude"),
   summarizationAgentConfigId: f.string().nullable().default(null),
   summarizationModel: f.string().nullable().default(null),
-  acpSessions: f.record(zod.string(), zod.string()).default({}),
   sessions: f
     .array(
       zod.object({
@@ -224,6 +231,26 @@ export const appSchema = createSchema({
   windowStates: f.array(windowStateSchema).default([]),
   majorMode: f.string().default("fundamental-mode"),
   minorModes: f.array(zod.string()).default([]),
+  focusedWindowId: f.string().nullable().default(null),
+  shortcutRegistry: f
+    .array(
+      zod.object({
+        id: zod.string(),
+        defaultBinding: zod.string(),
+        description: zod.string(),
+        scope: zod.string(),
+      }),
+    )
+    .default([]),
+  shortcutOverrides: f.record(zod.string(), zod.string()).default({}),
+  shortcutDisabled: f.array(zod.string()).default([]),
+  // Declarative focus-request channel. Writers set target + windowId + nonce;
+  // views subscribe via `useFocusOnRequest` and focus their own DOM when a
+  // request matches them. Nonce ensures repeated requests re-trigger even
+  // when target/windowId are unchanged.
+  focusRequestTarget: f.string().nullable().default(null),
+  focusRequestWindowId: f.string().nullable().default(null),
+  focusRequestNonce: f.string().default(""),
 });
 
 export const schema = appSchema;

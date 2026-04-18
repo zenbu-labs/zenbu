@@ -212,7 +212,7 @@ export class DbService extends Service {
     lastPageFilePath: string | null;
   }> {
     const kernel = this.client.readRoot().plugin.kernel;
-    const agent = (kernel.agents ?? []).find((entry) => entry.id === agentId);
+    const agent = kernel.agents.find((a) => a.id === agentId);
     const collectionId = agent?.eventLog?.collectionId ?? null;
 
     if (!collectionId) {

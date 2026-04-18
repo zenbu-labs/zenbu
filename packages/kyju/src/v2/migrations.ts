@@ -12,6 +12,13 @@ export type KyjuMigration = {
   version: number;
   operations?: MigrationOp[];
   migrate?: (prev: any, ctx: { apply: (data: any) => any }) => any;
+  /**
+   * Runs after the root is written and any new collections/blobs are created.
+   * Use when you need client access to concat into a fresh collection or
+   * perform any async follow-up work that can't fit in the pure `migrate`
+   * transform. Receives a client scoped to the DB root.
+   */
+  afterMigrate?: (ctx: { client: any }) => Promise<void> | void;
 };
 
 export type SectionConfig = {

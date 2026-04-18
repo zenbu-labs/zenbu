@@ -8,13 +8,16 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.16.1",
+    "@zenbu/kyju": "workspace:*",
     "effect": "catalog:",
+    "globby": "^14.1.0",
+    "js-yaml": "^4.1.1",
     "nanoid": "^5.1.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@zenbu/kyju": "workspace:*",
-    "vitest": "^3.1.1",
-    "typescript": "^5.4.5"
+    "@types/js-yaml": "^4.0.9",
+    "typescript": "^5.4.5",
+    "vitest": "^3.1.1"
   }
 }

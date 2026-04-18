@@ -26,6 +26,17 @@ export type BeforeCreateListener = (
 ) => Promise<void>;
 export type DestroyListener = (agentId: string, socketPath: string) => void;
 
+/**
+ * Durable check for "has this agent ever been prompted before". Used to gate
+ * the `firstPromptPreamble` so the preamble only fires on the truly-first
+ * prompt — including surviving process restarts. If omitted, "first" is
+ * scoped to this Agent instance (a fresh process forgets).
+ */
+export type FirstPromptLatch = {
+  hasFired: () => Effect.Effect<boolean, unknown>;
+  markFired: () => Effect.Effect<void, unknown>;
+};
+
 export type AgentConfig = {
   id?: string;
   clientConfig: AcpClientConfig;
@@ -36,6 +47,14 @@ export type AgentConfig = {
   onConfigOptions?: (options: any[]) => void;
   onConfigChange?: (options: any[]) => void;
   onStateChange?: (state: AgentState) => void;
+  /**
+   * Invoked once on the first prompt to this agent. Returned content blocks
+   * are prepended to the user's prompt. Use for skill routing metadata or
+   * other "system-prompt-ish" preamble that ACP has no first-class slot for.
+   * Blocks the send until it resolves; failures are non-fatal (logged).
+   */
+  firstPromptPreamble?: () => Effect.Effect<acp.ContentBlock[], unknown>;
+  firstPromptLatch?: FirstPromptLatch;
 };
 
 export class Agent {
@@ -72,6 +91,10 @@ export class Agent {
   private onStateChange?: (state: AgentState) => void;
   private _terminalManager: TerminalManager;
   private initialContextRef: Ref.Ref<acp.ContentBlock[] | null>;
+  private firstPromptPreamble?: () => Effect.Effect<acp.ContentBlock[], unknown>;
+  private firstPromptLatch?: FirstPromptLatch;
+  // In-memory fallback latch used when firstPromptLatch is not provided.
+  private _inMemoryFirstFired = false;
   private supportsLoadSession = false;
   private pendingHandoffContext: string | null = null;
   private eventBuffer: Array<{ timestamp: number; data: any }> = [];
@@ -95,6 +118,8 @@ export class Agent {
     onConfigOptions?: (options: any[]) => void,
     onConfigChange?: (options: any[]) => void,
     onStateChange?: (state: AgentState) => void,
+    firstPromptPreamble?: () => Effect.Effect<acp.ContentBlock[], unknown>,
+    firstPromptLatch?: FirstPromptLatch,
   ) {
     this.id = id;
     this.socketPath = socketPath;
@@ -112,6 +137,8 @@ export class Agent {
     this.onConfigOptions = onConfigOptions;
     this.onConfigChange = onConfigChange;
     this.onStateChange = onStateChange;
+    this.firstPromptPreamble = firstPromptPreamble;
+    this.firstPromptLatch = firstPromptLatch;
   }
 
   private _subscribeSessionUpdates() {
@@ -260,6 +287,7 @@ export class Agent {
         client: agent.client,
         initialContextRef: agent.initialContextRef,
         onStateChange: agent.onStateChange,
+        preamble: agent._computePreamble(),
       });
     }).pipe(
       Effect.catchAllCause((cause) =>
@@ -376,6 +404,8 @@ export class Agent {
         config.onConfigOptions,
         config.onConfigChange,
         config.onStateChange,
+        config.firstPromptPreamble,
+        config.firstPromptLatch,
       );
 
       const builtConfig = agent._buildClientConfig(baseClientConfig);
@@ -406,6 +436,47 @@ export class Agent {
     this.pendingHandoffContext = null;
     return result;
   }
+
+  /**
+   * Resolve the first-prompt preamble for the next send. Checks the latch
+   * (durable if provided, in-memory otherwise), invokes the provider once,
+   * and marks the latch even on failure/empty-result to avoid retrying on
+   * every send.
+   */
+  private _computePreamble = () => {
+    const agent = this;
+    return Effect.gen(function* () {
+      if (!agent.firstPromptPreamble) return [] as acp.ContentBlock[];
+
+      let alreadyFired: boolean;
+      if (agent.firstPromptLatch) {
+        alreadyFired = yield* agent.firstPromptLatch
+          .hasFired()
+          .pipe(Effect.catchAll(() => Effect.succeed(false)));
+      } else {
+        alreadyFired = agent._inMemoryFirstFired;
+      }
+      if (alreadyFired) return [] as acp.ContentBlock[];
+
+      const blocks = yield* agent
+        .firstPromptPreamble()
+        .pipe(
+          Effect.catchAll((err) => {
+            console.warn("[agent] firstPromptPreamble failed:", err);
+            return Effect.succeed([] as acp.ContentBlock[]);
+          }),
+        );
+
+      if (agent.firstPromptLatch) {
+        yield* agent.firstPromptLatch
+          .markFired()
+          .pipe(Effect.catchAll(() => Effect.void));
+      } else {
+        agent._inMemoryFirstFired = true;
+      }
+      return blocks;
+    });
+  };
 
   send = (content: acp.ContentBlock[]) => {
     const agent = this;
@@ -463,6 +534,7 @@ export class Agent {
             sessionId: newState.sessionId,
             content: agent._applyHandoff(content),
             onStateChange: agent.onStateChange,
+            preamble: agent._computePreamble(),
           });
         }
         return;
@@ -483,6 +555,7 @@ export class Agent {
         sessionId: state.sessionId,
         content: agent._applyHandoff(content),
         onStateChange: agent.onStateChange,
+        preamble: agent._computePreamble(),
       });
       yield* flushQueue({
         stateRef,
@@ -490,6 +563,7 @@ export class Agent {
         client,
         initialContextRef,
         onStateChange: agent.onStateChange,
+        preamble: agent._computePreamble(),
       });
     });
   };
@@ -599,6 +673,7 @@ const sendPrompt = (ctx: {
   sessionId: string;
   content: acp.ContentBlock[];
   onStateChange?: (state: AgentState) => void;
+  preamble?: Effect.Effect<acp.ContentBlock[], unknown>;
 }) =>
   Effect.gen(function* () {
     const {
@@ -608,6 +683,7 @@ const sendPrompt = (ctx: {
       sessionId,
       content,
       onStateChange,
+      preamble,
     } = ctx;
     const prompting: AgentState = { kind: "prompting", sessionId };
     yield* Ref.set(stateRef, prompting);
@@ -618,6 +694,14 @@ const sendPrompt = (ctx: {
     if (initialContext) {
       prompt = [...initialContext, ...content];
       yield* Ref.set(initialContextRef, null);
+    }
+    if (preamble) {
+      const blocks = yield* preamble.pipe(
+        Effect.catchAll(() => Effect.succeed([] as acp.ContentBlock[])),
+      );
+      if (blocks.length > 0) {
+        prompt = [...blocks, ...prompt];
+      }
     }
 
     yield* client.prompt({ sessionId, prompt });
@@ -633,10 +717,17 @@ const flushQueue = (ctx: {
   client: AcpClient;
   initialContextRef: Ref.Ref<acp.ContentBlock[] | null>;
   onStateChange?: (state: AgentState) => void;
+  preamble?: Effect.Effect<acp.ContentBlock[], unknown>;
 }) =>
   Effect.gen(function* () {
-    const { stateRef, queueRef, client, initialContextRef, onStateChange } =
-      ctx;
+    const {
+      stateRef,
+      queueRef,
+      client,
+      initialContextRef,
+      onStateChange,
+      preamble,
+    } = ctx;
     const queued = yield* Ref.get(queueRef);
 
     if (queued.length === 0) return;
@@ -652,5 +743,6 @@ const flushQueue = (ctx: {
       sessionId: state.sessionId,
       content: queued,
       onStateChange,
+      preamble,
     });
   });

@@ -4,6 +4,7 @@ import {
   ArrowLeftIcon,
   ArrowDownUpIcon,
   CheckIcon,
+  ChevronDownIcon,
   ChevronRightIcon,
   CopyIcon,
   DownloadCloudIcon,
@@ -11,6 +12,7 @@ import {
   SearchIcon,
   ShieldCheckIcon,
 } from "lucide-react";
+import { DiffViewer } from "@zenbu/diffs/react";
 import { Streamdown } from "streamdown";
 import { streamdownProps } from "../../chat/lib/streamdown-config";
 import {
@@ -40,6 +42,7 @@ import {
 import { cn } from "../../../lib/utils";
 import { useDb } from "../../../lib/kyju-react";
 import { useKyjuClient, useRpc } from "../../../lib/providers";
+import { KeybindingsSection } from "./KeybindingsSection";
 
 function useIconUrl(client: any, blobId: string | undefined) {
   const [url, setUrl] = useState<string | null>(null);
@@ -62,16 +65,20 @@ function useIconUrl(client: any, blobId: string | undefined) {
   return url;
 }
 
-type Section = "general" | "updates" | "registry";
+type Section = "general" | "updates" | "registry" | "keybindings";
+
+import type { ReviewFileEntry } from "./ReviewMode";
 
 export function SettingsDialog({
   open,
   onOpenChange,
   initialSection,
+  onRequestReview,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialSection?: Section;
+  onRequestReview?: (entries: ReviewFileEntry[]) => void;
 }) {
   const [section, setSection] = useState<Section>(initialSection ?? "registry");
 
@@ -96,6 +103,11 @@ export function SettingsDialog({
               onClick={() => setSection("general")}
             />
             <SidebarItem
+              label="Keybindings"
+              active={section === "keybindings"}
+              onClick={() => setSection("keybindings")}
+            />
+            <SidebarItem
               label="Updates"
               active={section === "updates"}
               onClick={() => setSection("updates")}
@@ -103,13 +115,23 @@ export function SettingsDialog({
           </nav>
           <div
             className={cn(
-              "flex-1 min-w-0",
-              section === "registry" ? "overflow-hidden" : "overflow-y-auto",
+              "flex-1 min-w-0 flex flex-col min-h-0",
+              section === "registry" || section === "keybindings"
+                ? "overflow-hidden"
+                : "overflow-y-auto",
             )}
           >
-            {section === "general" && <GeneralSection />}
-            {section === "updates" && <UpdatesSection />}
-            {section === "registry" && <RegistrySection />}
+            {/* Blank space so the absolute-positioned Close (X) button at the
+                top-right has clear real estate and never overlaps content. */}
+            <div className="h-10 shrink-0" aria-hidden />
+            <div className="flex-1 min-h-0 flex flex-col">
+              {section === "general" && <GeneralSection />}
+              {section === "updates" && (
+                <UpdatesSection onRequestReview={onRequestReview} />
+              )}
+              {section === "registry" && <RegistrySection />}
+              {section === "keybindings" && <KeybindingsSection />}
+            </div>
           </div>
         </div>
       </DialogContent>
@@ -643,7 +665,11 @@ type DataCtx = {
   rpc: any;
 };
 
-function UpdatesSection() {
+function UpdatesSection({
+  onRequestReview,
+}: {
+  onRequestReview?: (entries: ReviewFileEntry[]) => void;
+}) {
   const rpc = useRpc();
   const [tab, setTab] = useState<TabKey>("overview");
   const [status, setStatus] = useState<UpdateStatus | null>(null);
@@ -754,6 +780,7 @@ function UpdatesSection() {
             ctx={ctx}
             loadingOverview={loadingOverview}
             overviewError={overviewError}
+            onRequestReview={onRequestReview}
           />
         )}
         {tab === "history" && <HistoryTab ctx={ctx} />}
@@ -1023,6 +1050,7 @@ const STATUS_LABEL: Record<FileChange["status"], string> = {
 
 type UserChange = {
   path: string;
+  oldPath: string | null;
   label: string;
   detail?: string;
 };
@@ -1032,6 +1060,7 @@ function coalesceChanges(status: WorkingTreeStatus): UserChange[] {
   for (const f of status.staged) {
     map.set(f.path, {
       path: f.path,
+      oldPath: f.oldPath,
       label: STATUS_LABEL[f.status],
       detail: f.oldPath ? `from ${f.oldPath}` : undefined,
     });
@@ -1040,28 +1069,115 @@ function coalesceChanges(status: WorkingTreeStatus): UserChange[] {
     if (!map.has(f.path)) {
       map.set(f.path, {
         path: f.path,
+        oldPath: f.oldPath,
         label: STATUS_LABEL[f.status],
         detail: f.oldPath ? `from ${f.oldPath}` : undefined,
       });
     }
   }
   for (const p of status.untracked) {
-    if (!map.has(p)) map.set(p, { path: p, label: "new" });
+    if (!map.has(p)) map.set(p, { path: p, oldPath: null, label: "new" });
   }
   for (const p of status.conflicted) {
-    map.set(p, { path: p, label: "conflicted" });
+    map.set(p, { path: p, oldPath: null, label: "conflicted" });
   }
   return [...map.values()].sort((a, b) => a.path.localeCompare(b.path));
+}
+
+type FileDiffResult =
+  | { kind: "ok"; oldText: string; newText: string; binary: boolean }
+  | { kind: "error"; message: string };
+
+function ChangeRow({ change, rpc }: { change: UserChange; rpc: any }) {
+  const [expanded, setExpanded] = useState(false);
+  const [diff, setDiff] = useState<FileDiffResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const cacheKey = `${change.path}|${change.oldPath ?? ""}`;
+  const loadedKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!expanded) return;
+    if (loadedKeyRef.current === cacheKey) return;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      try {
+        const result: FileDiffResult = await rpc.gitUpdates.getFileDiff({
+          path: change.path,
+          oldPath: change.oldPath,
+        });
+        if (cancelled) return;
+        loadedKeyRef.current = cacheKey;
+        setDiff(result);
+      } catch (err) {
+        if (cancelled) return;
+        setDiff({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, cacheKey, change.path, change.oldPath, rpc]);
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left hover:bg-muted/60"
+      >
+        <span className="flex items-center gap-1.5 min-w-0">
+          {expanded ? (
+            <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground" />
+          )}
+          <span className="font-mono text-xs break-all">{change.path}</span>
+        </span>
+        <span className="text-[11px] text-muted-foreground shrink-0">
+          {change.label}
+          {change.detail ? ` · ${change.detail}` : ""}
+        </span>
+      </button>
+      {expanded && (
+        <div className="border-t border-border bg-background">
+          {loading && !diff && (
+            <p className="px-3 py-2 text-[11px] text-muted-foreground">Loading diff…</p>
+          )}
+          {diff?.kind === "error" && (
+            <p className="px-3 py-2 text-[11px] text-red-500">{diff.message}</p>
+          )}
+          {diff?.kind === "ok" && diff.binary && (
+            <p className="px-3 py-2 text-[11px] text-muted-foreground">Binary file — no preview.</p>
+          )}
+          {diff?.kind === "ok" && !diff.binary && diff.oldText === diff.newText && (
+            <p className="px-3 py-2 text-[11px] text-muted-foreground">No textual changes.</p>
+          )}
+          {diff?.kind === "ok" && !diff.binary && diff.oldText !== diff.newText && (
+            <DiffViewer
+              oldText={diff.oldText}
+              newText={diff.newText}
+              language={change.path}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ChangesTab({
   ctx,
   loadingOverview,
   overviewError,
+  onRequestReview,
 }: {
   ctx: DataCtx;
   loadingOverview: boolean;
   overviewError: string | null;
+  onRequestReview?: (entries: ReviewFileEntry[]) => void;
 }) {
   const { overview, status, refreshAll, rpc } = ctx;
   const [message, setMessage] = useState("");
@@ -1108,12 +1224,30 @@ function ChangesTab({
   return (
     <div className="space-y-5">
       <div className="space-y-2">
-        <div className="flex items-baseline gap-2">
+        <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold">Your changes</h3>
           {hasChanges && (
             <span className="text-xs text-muted-foreground">
               {changes.length} file{changes.length === 1 ? "" : "s"}
             </span>
+          )}
+          {hasChanges && onRequestReview && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto h-7 text-xs"
+              onClick={() =>
+                onRequestReview(
+                  changes.map((c) => ({
+                    path: c.path,
+                    oldPath: c.oldPath,
+                    label: c.label,
+                  })),
+                )
+              }
+            >
+              Review changes
+            </Button>
           )}
         </div>
         {!hasChanges ? (
@@ -1121,18 +1255,9 @@ function ChangesTab({
             You haven't modified anything yet.
           </p>
         ) : (
-          <div className="rounded-md border border-border bg-muted/30 divide-y divide-border max-h-64 overflow-y-auto">
+          <div className="rounded-md border border-border bg-muted/30 divide-y divide-border max-h-[60vh] overflow-y-auto">
             {changes.map((c) => (
-              <div
-                key={c.path}
-                className="flex items-center justify-between gap-3 px-3 py-1.5"
-              >
-                <span className="font-mono text-xs break-all">{c.path}</span>
-                <span className="text-[11px] text-muted-foreground shrink-0">
-                  {c.label}
-                  {c.detail ? ` · ${c.detail}` : ""}
-                </span>
-              </div>
+              <ChangeRow key={c.path} change={c} rpc={rpc} />
             ))}
           </div>
         )}

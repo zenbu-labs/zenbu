@@ -59,6 +59,10 @@ export const migrationPlugin = (migrations: KyjuMigration[]): DbPlugin => ({
         await (client as any)[op.key]?.create?.(new Uint8Array(0));
       }
 
+      if (migration.afterMigrate) {
+        await migration.afterMigrate({ client });
+      }
+
       await client.update((r: any) => {
         let target = r;
         for (const segment of pluginPath) {
@@ -134,6 +138,11 @@ export const sectionMigrationPlugin = (sections: SectionConfig[]): DbPlugin => (
           await (client as any).plugin?.[name]?.[op.key]?.create?.(
             new Uint8Array(0),
           );
+        }
+
+        if (migration.afterMigrate) {
+          const sectionClient = (client as any).plugin?.[name];
+          await migration.afterMigrate({ client: sectionClient });
         }
 
         await client.update((r: any) => {

@@ -23,6 +23,7 @@ import {
   restoreChatBlobs,
 } from "../plugins/DraftPersistencePlugin";
 import { SlashCommandPlugin } from "../commands/SlashCommandPlugin";
+import { ReloadMenu } from "../commands/ReloadMenu";
 import { CtrlNPPlugin, NodeDeletePlugin } from "../plugins/KeyboardPlugins";
 import { RichPastePlugin } from "../plugins/RichPastePlugin";
 import { serializeEditorContent, type CollectedImage } from "../lib/serialize";
@@ -88,10 +89,12 @@ function SubmitPlugin({
   onSubmit,
   menuOpenRef,
   slashMenuOpenRef,
+  reloadMenuOpenRef,
 }: {
   onSubmit: (text: string, images: CollectedImage[]) => void;
   menuOpenRef: React.RefObject<boolean>;
   slashMenuOpenRef: React.RefObject<boolean>;
+  reloadMenuOpenRef: React.RefObject<boolean>;
 }) {
   const [editor] = useLexicalComposerContext();
 
@@ -100,7 +103,12 @@ function SubmitPlugin({
       KEY_ENTER_COMMAND,
       (event: KeyboardEvent | null) => {
         if (event?.shiftKey) return false;
-        if (menuOpenRef.current || slashMenuOpenRef.current) return false;
+        if (
+          menuOpenRef.current ||
+          slashMenuOpenRef.current ||
+          reloadMenuOpenRef.current
+        )
+          return false;
         event?.preventDefault();
         editor.getEditorState().read(() => {
           const { text, images } = serializeEditorContent();
@@ -117,7 +125,7 @@ function SubmitPlugin({
       },
       COMMAND_PRIORITY_HIGH,
     );
-  }, [editor, onSubmit, menuOpenRef, slashMenuOpenRef]);
+  }, [editor, onSubmit, menuOpenRef, slashMenuOpenRef, reloadMenuOpenRef]);
 
   return null;
 }
@@ -359,15 +367,24 @@ export function Composer({
 }) {
   const filePickerOpenRef = useRef(false);
   const slashMenuOpenRef = useRef(false);
+  const reloadMenuOpenRef = useRef(false);
+  const composerWrapperRef = useRef<HTMLDivElement | null>(null);
+  const [reloadMenuOpen, setReloadMenuOpen] = useState(false);
   const rpc = useRpc();
   const client = useKyjuClient();
 
   const agentConfigs = useDb((root) => root.plugin.kernel.agentConfigs);
-  const agents = useDb((root) => root.plugin.kernel.agents);
-
-  const currentAgent = agents?.find((a) => a.id === agentId);
+  const currentAgent = useDb((root) =>
+    root.plugin.kernel.agents.find((a) => a.id === agentId),
+  );
   const streaming = currentAgent?.status === "streaming";
-  const template = agentConfigs?.find((c) => c.id === currentAgent?.configId);
+  const template = agentConfigs.find((c) => c.id === currentAgent?.configId);
+  const reloadMode: "continue" | "keep-alive" =
+    currentAgent?.reloadMode === "continue" ? "continue" : "keep-alive";
+
+  useEffect(() => {
+    reloadMenuOpenRef.current = reloadMenuOpen;
+  }, [reloadMenuOpen]);
 
   const initialEditorConfig = useMemo(
     () => makeEditorConfig(getInitialEditorState(client, agentId)),
@@ -407,10 +424,11 @@ export function Composer({
         return;
       }
 
-      const agents = client.plugin.kernel.agents.read();
-      const agentIndex = agents?.findIndex((a) => a.id === agentId) ?? -1;
-
+      const agentIndex = client.plugin.kernel.agents
+        .read()
+        .findIndex((a) => a.id === agentId);
       if (agentIndex >= 0) {
+        const agentNode = client.plugin.kernel.agents[agentIndex];
         const eventData: {
           kind: "user_prompt";
           text: string;
@@ -436,11 +454,11 @@ export function Composer({
               imageCount: images.length,
             };
           }
-          client.plugin.kernel.agents[agentIndex].eventLog.concat([
+          agentNode.eventLog.concat([
             { timestamp: now, data: eventData },
           ]);
-          client.plugin.kernel.agents[agentIndex].status.set("streaming");
-          client.plugin.kernel.agents[agentIndex].lastUserMessageAt?.set(now);
+          agentNode.status.set("streaming");
+          agentNode.lastUserMessageAt?.set(now);
         });
       }
 
@@ -486,7 +504,10 @@ export function Composer({
 
   return (
     <div className="mx-auto w-full max-w-[919px] px-4 pt-1 pb-3">
-      <div className="overflow-hidden rounded-lg border border-neutral-300 bg-white/80">
+      <div
+        ref={composerWrapperRef}
+        className="relative overflow-visible rounded-lg border border-neutral-300 bg-white/80"
+      >
         <LexicalComposer
           key={`${_composerKey}-${agentId}`}
           initialConfig={initialEditorConfig}
@@ -512,6 +533,7 @@ export function Composer({
             onSubmit={handleSubmit}
             menuOpenRef={filePickerOpenRef}
             slashMenuOpenRef={slashMenuOpenRef}
+            reloadMenuOpenRef={reloadMenuOpenRef}
           />
           <AutoFocusPlugin />
           <FilePickerPlugin menuOpenRef={filePickerOpenRef} agentId={agentId} />
@@ -520,13 +542,9 @@ export function Composer({
           <SlashCommandPlugin
             menuOpenRef={slashMenuOpenRef}
             agentId={agentId}
-            onAction={async (action, id) => {
-              if (action === "reload") {
-                try {
-                  await rpc.agent.reload(id);
-                } catch (err) {
-                  console.error("[composer] reload failed", err);
-                }
+            onAction={(action) => {
+              if (action === "reload-menu") {
+                setReloadMenuOpen(true);
               }
             }}
           />
@@ -535,6 +553,29 @@ export function Composer({
           <RichPastePlugin />
           {streaming && <InterruptPlugin onInterrupt={handleInterrupt} />}
         </LexicalComposer>
+
+        <ReloadMenu
+          open={reloadMenuOpen}
+          anchorEl={composerWrapperRef.current}
+          reloadMode={reloadMode}
+          onReloadAgent={async () => {
+            try {
+              await rpc.agent.reload(agentId);
+            } catch (err) {
+              console.error("[composer] reload failed", err);
+            }
+          }}
+          onToggleHotReload={async () => {
+            const next: "continue" | "keep-alive" =
+              reloadMode === "keep-alive" ? "continue" : "keep-alive";
+            try {
+              await rpc.agent.setReloadMode(agentId, next);
+            } catch (err) {
+              console.error("[composer] setReloadMode failed", err);
+            }
+          }}
+          onClose={() => setReloadMenuOpen(false)}
+        />
 
         <div className="flex flex-wrap items-center gap-0.5 px-2 pb-1">
           {agentConfigs && agentConfigs.length > 0 && (

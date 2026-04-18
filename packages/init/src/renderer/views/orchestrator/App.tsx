@@ -1,5 +1,21 @@
-import { Component, type ErrorInfo, type ReactNode, useMemo, useCallback, useState, useEffect, useRef } from "react";
-import { SearchIcon, SettingsIcon, RotateCwIcon, DownloadIcon, GitMergeIcon, RefreshCwIcon } from "lucide-react";
+import {
+  Component,
+  type ErrorInfo,
+  type ReactNode,
+  useMemo,
+  useCallback,
+  useState,
+  useEffect,
+  useRef,
+} from "react";
+import {
+  SearchIcon,
+  SettingsIcon,
+  RotateCwIcon,
+  DownloadIcon,
+  GitMergeIcon,
+  RefreshCwIcon,
+} from "lucide-react";
 import { nanoid } from "nanoid";
 import { makeCollection } from "@zenbu/kyju/schema";
 import {
@@ -32,6 +48,9 @@ import {
 } from "../../components/ui/dropdown-menu";
 import { LeafPane } from "./components/LeafPane";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { ReviewMode, type ReviewFileEntry } from "./components/ReviewMode";
+import { ShortcutForwarderProvider } from "./providers/shortcut-forwarder";
+import { useFocusOnRequest } from "../../lib/focus-request";
 import {
   type PaneState,
   type PaneNode,
@@ -40,6 +59,10 @@ import {
   switchTabInPane,
   closeTabInPane,
 } from "./pane-ops";
+import {
+  insertHotAgent,
+  type ArchivedAgent,
+} from "../../../../shared/agent-ops";
 
 const params = new URLSearchParams(window.location.search);
 const wsPort = Number(params.get("wsPort"));
@@ -54,7 +77,10 @@ type SessionItem = WindowState["sessions"][number];
 type AgentItem = SchemaRoot["agents"][number];
 type RegistryEntry = { scope: string; url: string; port: number };
 
-type ErrorFallbackRender = (args: { error: Error; reset: () => void }) => ReactNode;
+type ErrorFallbackRender = (args: {
+  error: Error;
+  reset: () => void;
+}) => ReactNode;
 
 class ErrorBoundary extends Component<
   { children: ReactNode; scope: string; fallback: ErrorFallbackRender },
@@ -67,7 +93,11 @@ class ErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error(`[orchestrator:${this.props.scope}] Uncaught error:`, error, info.componentStack);
+    console.error(
+      `[orchestrator:${this.props.scope}] Uncaught error:`,
+      error,
+      info.componentStack,
+    );
   }
 
   render() {
@@ -81,14 +111,24 @@ class ErrorBoundary extends Component<
   }
 }
 
-function FullErrorFallback({ error, onReset }: { error: Error; onReset: () => void }) {
+function FullErrorFallback({
+  error,
+  onReset,
+}: {
+  error: Error;
+  onReset: () => void;
+}) {
   const [showStack, setShowStack] = useState(false);
 
   return (
     <div className="flex h-full items-center justify-center bg-[#F4F4F4] p-8">
       <div className="flex max-w-lg flex-col gap-3 rounded-lg border border-red-200 bg-white p-6 shadow-sm">
-        <div className="text-sm font-medium text-red-600">Something went wrong</div>
-        <div className="text-xs text-neutral-600 font-mono break-all">{error.message}</div>
+        <div className="text-sm font-medium text-red-600">
+          Something went wrong
+        </div>
+        <div className="text-xs text-neutral-600 font-mono break-all">
+          {error.message}
+        </div>
         {error.stack && (
           <button
             onClick={() => setShowStack((s) => !s)}
@@ -113,10 +153,20 @@ function FullErrorFallback({ error, onReset }: { error: Error; onReset: () => vo
   );
 }
 
-function TitleBarErrorFallback({ error, onReset, hasTabs }: { error: Error; onReset: () => void; hasTabs: boolean }) {
+function TitleBarErrorFallback({
+  error,
+  onReset,
+  hasTabs,
+}: {
+  error: Error;
+  onReset: () => void;
+  hasTabs: boolean;
+}) {
   return (
     <div
-      className={`flex h-9 shrink-0 items-center gap-2 px-3 ${hasTabs ? "bg-[#E0E0E0]" : "bg-[#F4F4F4]"}`}
+      className={`flex h-9 shrink-0 items-center gap-2 px-3 ${
+        hasTabs ? "bg-[#E0E0E0]" : "bg-[#F4F4F4]"
+      }`}
       style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
     >
       <div
@@ -124,7 +174,10 @@ function TitleBarErrorFallback({ error, onReset, hasTabs }: { error: Error; onRe
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
         <span className="text-xs text-red-600 shrink-0">Title bar error</span>
-        <span className="text-xs text-neutral-500 font-mono truncate" title={error.message}>
+        <span
+          className="text-xs text-neutral-500 font-mono truncate"
+          title={error.message}
+        >
           {error.message}
         </span>
         <button
@@ -139,28 +192,28 @@ function TitleBarErrorFallback({ error, onReset, hasTabs }: { error: Error; onRe
 }
 
 function AgentLabel({ agent }: { agent: AgentItem }) {
-  const { items: events } = useCollection(agent.eventLog)
+  const { items: events } = useCollection(agent.eventLog);
   const label = useMemo(() => {
-    if (agent.title?.kind === "set") return agent.title.value
-    let last: string | undefined
+    if (agent.title?.kind === "set") return agent.title.value;
+    let last: string | undefined;
     for (const event of events) {
-      if (event.data.kind === "user_prompt") last = event.data.text
+      if (event.data.kind === "user_prompt") last = event.data.text;
     }
-    return last?.replace(/\s+/g, " ").trim() || "New Chat"
-  }, [agent.title, events])
-  return <>{label}</>
+    return last?.replace(/\s+/g, " ").trim() || "New Chat";
+  }, [agent.title, events]);
+  return <>{label}</>;
 }
 
 function timeAgo(ts: number | undefined): string {
-  if (!ts) return ""
-  const seconds = Math.floor((Date.now() - ts) / 1000)
-  if (seconds < 60) return "just now"
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h`
-  const days = Math.floor(hours / 24)
-  return `${days}d`
+  if (!ts) return "";
+  const seconds = Math.floor((Date.now() - ts) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
 }
 
 function AgentPickerCombobox({
@@ -168,15 +221,18 @@ function AgentPickerCombobox({
   sessions,
   onSelect,
 }: {
-  agents: AgentItem[]
-  sessions: SessionItem[]
-  onSelect: (agentId: string) => void
+  agents: AgentItem[];
+  sessions: SessionItem[];
+  onSelect: (agentId: string) => void;
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(false);
   const sortedAgents = useMemo(
-    () => [...agents].sort((a, b) => (b.lastUserMessageAt ?? 0) - (a.lastUserMessageAt ?? 0)),
+    () =>
+      [...agents].sort(
+        (a, b) => (b.lastUserMessageAt ?? 0) - (a.lastUserMessageAt ?? 0),
+      ),
     [agents],
-  )
+  );
 
   return (
     <Popover open={open} onOpenChange={setOpen} modal>
@@ -199,8 +255,8 @@ function AgentPickerCombobox({
                   key={agent.id}
                   value={agent.id}
                   onSelect={() => {
-                    onSelect(agent.id)
-                    setOpen(false)
+                    onSelect(agent.id);
+                    setOpen(false);
                   }}
                   className="flex items-center gap-2 text-xs"
                 >
@@ -219,7 +275,7 @@ function AgentPickerCombobox({
         </Command>
       </PopoverContent>
     </Popover>
-  )
+  );
 }
 
 type UpdateStatus =
@@ -242,25 +298,29 @@ type UpdateStatus =
 function ReloadMenu() {
   const rpc = useRpc();
   const [status, setStatus] = useState<UpdateStatus | null>(null);
-  const [pending, setPending] = useState<"check" | "pull" | "reload" | null>(null);
-  const [upToDate, setUpToDate] = useState(false);
+  const [pullPending, setPullPending] = useState<"check" | "pull" | null>(null);
+  const [reloadPending, setReloadPending] = useState(false);
+  const [transient, setTransient] = useState<"updated" | "up-to-date" | null>(
+    null,
+  );
 
   const handleFullReload = async () => {
-    if (pending) return;
-    setPending("reload");
+    if (reloadPending) return;
+    setReloadPending(true);
     try {
       await rpc.runtime.reload();
     } catch (e) {
       console.error("[orchestrator] full reload failed:", e);
     } finally {
-      setPending(null);
+      setReloadPending(false);
     }
   };
 
   useEffect(() => {
     (async () => {
       try {
-        const cached: UpdateStatus | null = await (rpc as any).gitUpdates.getCachedStatus();
+        const cached: UpdateStatus | null =
+          await rpc.gitUpdates.getCachedStatus();
         if (cached) setStatus(cached);
       } catch {}
     })();
@@ -270,45 +330,43 @@ function ReloadMenu() {
   const hasUpdates =
     status?.kind === "ok" && status.behind > 0 && status.mergeable !== false;
 
+  const flashTransient = (kind: "updated" | "up-to-date") => {
+    setTransient(kind);
+    setTimeout(() => {
+      setTransient((cur) => (cur === kind ? null : cur));
+    }, 2000);
+  };
+
   const handlePullItem = async () => {
-    if (hasConflicts || pending) return;
-    setUpToDate(false);
-    if (hasUpdates) {
-      setPending("pull");
-      try {
-        const result = await (rpc as any).gitUpdates.pullUpdates();
-        if (result?.ok) {
-          const next: UpdateStatus = await (rpc as any).gitUpdates.checkUpdates(true);
-          setStatus(next);
-        }
-      } finally {
-        setPending(null);
+    if (hasConflicts || pullPending) return;
+    setTransient(null);
+    setPullPending(hasUpdates ? "pull" : "check");
+    try {
+      const result = await rpc.gitUpdates.pullAndInstall();
+      const next: UpdateStatus = await rpc.gitUpdates.checkUpdates(true);
+      setStatus(next);
+      if (result?.ok) {
+        flashTransient(result.updated ? "updated" : "up-to-date");
+      } else if (result?.error) {
+        console.error("[orchestrator] pullAndInstall failed:", result.error);
       }
-    } else {
-      setPending("check");
-      try {
-        const next: UpdateStatus = await (rpc as any).gitUpdates.checkUpdates(true);
-        setStatus(next);
-        if (next.kind === "ok" && next.behind === 0) {
-          setUpToDate(true);
-          setTimeout(() => setUpToDate(false), 2000);
-        }
-      } finally {
-        setPending(null);
-      }
+    } finally {
+      setPullPending(null);
     }
   };
 
   const pullLabel =
-    pending === "pull"
-      ? "Pulling…"
-      : pending === "check"
-        ? "Checking…"
-        : hasConflicts
-          ? "Conflicts — resolve in Settings"
-          : upToDate
-            ? "Up to date"
-            : "Pull updates";
+    pullPending === "pull"
+      ? "Pulling & installing…"
+      : pullPending === "check"
+      ? "Checking…"
+      : hasConflicts
+      ? "Conflicts — resolve in Settings"
+      : transient === "updated"
+      ? "Updated!"
+      : transient === "up-to-date"
+      ? "Up to date"
+      : "Pull updates";
 
   return (
     <DropdownMenu>
@@ -331,18 +389,18 @@ function ReloadMenu() {
         </DropdownMenuItem>
         <DropdownMenuItem
           className="text-xs"
-          disabled={pending !== null}
+          disabled={reloadPending}
           onSelect={(e) => {
             e.preventDefault();
             handleFullReload();
           }}
         >
           <RefreshCwIcon className="size-3" />
-          {pending === "reload" ? "Reloading…" : "Full reload"}
+          {reloadPending ? "Reloading…" : "Full reload"}
         </DropdownMenuItem>
         <DropdownMenuItem
           className="text-xs"
-          disabled={hasConflicts || pending !== null}
+          disabled={hasConflicts || pullPending !== null}
           onSelect={(e) => {
             e.preventDefault();
             handlePullItem();
@@ -354,7 +412,7 @@ function ReloadMenu() {
             <DownloadIcon className="size-3" />
           )}
           <span className="flex-1">{pullLabel}</span>
-          {hasUpdates && (
+          {hasUpdates && pullPending === null && transient === null && (
             <span className="size-1.5 rounded-full bg-blue-500" />
           )}
         </DropdownMenuItem>
@@ -371,16 +429,18 @@ function TitleBar({
   onNew,
   onLoadAgent,
 }: {
-  agents: AgentItem[]
-  sessions: SessionItem[]
-  hasTabs: boolean
-  onSettings: () => void
-  onNew: () => void
-  onLoadAgent: (agentId: string) => void
+  agents: AgentItem[];
+  sessions: SessionItem[];
+  hasTabs: boolean;
+  onSettings: () => void;
+  onNew: () => void;
+  onLoadAgent: (agentId: string) => void;
 }) {
   return (
     <div
-      className={`flex h-9 shrink-0 items-center ${hasTabs ? "bg-[#E0E0E0]" : "bg-[#F4F4F4]"}`}
+      className={`flex h-9 shrink-0 items-center ${
+        hasTabs ? "bg-[#E0E0E0]" : "bg-[#F4F4F4]"
+      }`}
       style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
     >
       <div
@@ -425,9 +485,10 @@ function TitleBarActions({ onNew }: { onNew: () => void }) {
 }
 
 function OrchestratorContent() {
-  const allWindowStates = useDb((root) => root.plugin.kernel.windowStates) ?? [];
+  const allWindowStates =
+    useDb((root) => root.plugin.kernel.windowStates) ?? [];
   const windowState = useMemo(
-    () => (allWindowStates as WindowState[]).find((ws) => ws.id === windowId),
+    () => allWindowStates.find((ws) => ws.id === windowId),
     [allWindowStates],
   );
   const sessions = windowState?.sessions ?? [];
@@ -435,10 +496,10 @@ function OrchestratorContent() {
   const registry = useDb((root) => root.plugin.kernel.viewRegistry);
   const client = useKyjuClient();
   const rpc = useRpc();
-
+  // panes should of been deleted
   const paneState: PaneState = useMemo(
     () => ({
-      panes: (windowState?.panes ?? []) as PaneNode[],
+      panes: windowState?.panes ?? [],
       rootPaneId: windowState?.rootPaneId ?? null,
       focusedPaneId: windowState?.focusedPaneId ?? null,
     }),
@@ -446,14 +507,19 @@ function OrchestratorContent() {
   );
 
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<"general" | "registry">("registry");
+  const [settingsSection, setSettingsSection] = useState<
+    "general" | "registry"
+  >("registry");
+  const [reviewEntries, setReviewEntries] = useState<ReviewFileEntry[] | null>(
+    null,
+  );
   const initializedRef = useRef(false);
   const ensuredRef = useRef(false);
 
   useEffect(() => {
     if (ensuredRef.current || !windowId) return;
     const states = client.readRoot().plugin.kernel.windowStates ?? [];
-    if ((states as WindowState[]).some((ws) => ws.id === windowId)) return;
+    if (states.some((ws) => ws.id === windowId)) return;
     ensuredRef.current = true;
     client.plugin.kernel.windowStates.set([
       ...states,
@@ -480,9 +546,9 @@ function OrchestratorContent() {
     async (updater: (ws: WindowState) => void) => {
       const root = client.readRoot();
       const states = root.plugin.kernel.windowStates ?? [];
-      const idx = (states as WindowState[]).findIndex((ws) => ws.id === windowId);
+      const idx = states.findIndex((ws) => ws.id === windowId);
       if (idx < 0) return;
-      const updated = [...states] as WindowState[];
+      const updated = [...states];
       updated[idx] = { ...updated[idx] };
       updater(updated[idx]);
       await client.plugin.kernel.windowStates.set(updated);
@@ -493,7 +559,7 @@ function OrchestratorContent() {
   const writePaneState = useCallback(
     async (next: PaneState) => {
       await updateWindowState((ws) => {
-        ws.panes = next.panes as any;
+        ws.panes = next.panes;
         ws.rootPaneId = next.rootPaneId;
         ws.focusedPaneId = next.focusedPaneId;
       });
@@ -512,7 +578,8 @@ function OrchestratorContent() {
     const sessionId = nanoid();
 
     // Inherit cwd from the focused agent (like terminal new tabs)
-    const focusedPaneId = windowState?.focusedPaneId ?? windowState?.rootPaneId ?? null;
+    const focusedPaneId =
+      windowState?.focusedPaneId ?? windowState?.rootPaneId ?? null;
     const focusedPane = focusedPaneId
       ? (windowState?.panes ?? []).find((p) => p.id === focusedPaneId)
       : undefined;
@@ -521,33 +588,40 @@ function OrchestratorContent() {
       ? sessions.find((s) => s.id === focusedSessionId)
       : undefined;
     const focusedAgent = focusedSession
-      ? (kernel.agents ?? []).find((a) => a.id === focusedSession.agentId)
+      ? kernel.agents.find((a) => a.id === focusedSession.agentId)
       : undefined;
     const inheritedCwd =
       typeof focusedAgent?.metadata?.cwd === "string"
-        ? (focusedAgent.metadata.cwd as string)
+        ? focusedAgent.metadata.cwd
         : undefined;
     const newAgentCwd = inheritedCwd ?? defaultCwd;
 
     // Copy config from most recent agent with same configId, validating against available options
-    const existingAgents = (kernel.agents ?? []).filter(
+    const existingAgents = kernel.agents.filter(
       (a) => a.configId === selectedConfig.id,
     );
     const lastAgent = existingAgents[existingAgents.length - 1];
 
-    const validModel = lastAgent?.model &&
+    const validModel =
+      lastAgent?.model &&
       (!selectedConfig.availableModels?.length ||
-        selectedConfig.availableModels.some((m) => m.value === lastAgent.model));
-    const validThinking = lastAgent?.thinkingLevel &&
+        selectedConfig.availableModels.some(
+          (m) => m.value === lastAgent.model,
+        ));
+    const validThinking =
+      lastAgent?.thinkingLevel &&
       (!selectedConfig.availableThinkingLevels?.length ||
-        selectedConfig.availableThinkingLevels.some((t) => t.value === lastAgent.thinkingLevel));
-    const validMode = lastAgent?.mode &&
+        selectedConfig.availableThinkingLevels.some(
+          (t) => t.value === lastAgent.thinkingLevel,
+        ));
+    const validMode =
+      lastAgent?.mode &&
       (!selectedConfig.availableModes?.length ||
         selectedConfig.availableModes.some((m) => m.value === lastAgent.mode));
 
-    await client.plugin.kernel.agents.set([
-      ...kernel.agents,
-      {
+    let evicted: ArchivedAgent[] = [];
+    await client.update((root) => {
+      evicted = insertHotAgent(root.plugin.kernel, {
         id: agentId,
         name: selectedConfig.name,
         startCommand: selectedConfig.startCommand,
@@ -555,19 +629,30 @@ function OrchestratorContent() {
         metadata: {
           ...(newAgentCwd ? { cwd: newAgentCwd } : {}),
         },
-        eventLog: makeCollection({ collectionId: nanoid(), debugName: "eventLog", }),
+        eventLog: makeCollection({
+          collectionId: nanoid(),
+          debugName: "eventLog",
+        }),
         status: "idle",
         ...(validModel ? { model: lastAgent.model } : {}),
         ...(validThinking ? { thinkingLevel: lastAgent.thinkingLevel } : {}),
         ...(validMode ? { mode: lastAgent.mode } : {}),
-        title: {
-          kind: "not-available"
-        }
-      },
-    ]);
+        title: { kind: "not-available" },
+        reloadMode: "keep-alive",
+        sessionId: null,
+        firstPromptSentAt: null,
+        createdAt: Date.now(),
+      });
+    });
+    if (evicted.length > 0) {
+      await client.plugin.kernel.archivedAgents.concat(evicted).catch(() => {});
+    }
 
     await updateWindowState((ws) => {
-      ws.sessions = [...ws.sessions, { id: sessionId, agentId,lastViewedAt: null }];
+      ws.sessions = [
+        ...ws.sessions,
+        { id: sessionId, agentId, lastViewedAt: null },
+      ];
     });
 
     rpc.agent
@@ -582,7 +667,10 @@ function OrchestratorContent() {
     async (agentId: string): Promise<string> => {
       const sessionId = nanoid();
       await updateWindowState((ws) => {
-        ws.sessions = [...ws.sessions, { id: sessionId, agentId,lastViewedAt: null }];
+        ws.sessions = [
+          ...ws.sessions,
+          { id: sessionId, agentId, lastViewedAt: null },
+        ];
       });
       return sessionId;
     },
@@ -702,7 +790,11 @@ function OrchestratorContent() {
   );
 
   const handleTabTearOff = useCallback(
-    async (tabId: string, screenX: number, screenY: number): Promise<string | null> => {
+    async (
+      tabId: string,
+      screenX: number,
+      screenY: number,
+    ): Promise<string | null> => {
       const paneId = paneState.rootPaneId;
       if (!paneId) return null;
       const next = closeTabInPane(paneState, paneId, tabId);
@@ -763,15 +855,50 @@ function OrchestratorContent() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  const hasTabs = paneState.panes.some((p) => p.type === "leaf" && p.tabIds.length > 1);
+  const hasTabs = paneState.panes.some(
+    (p) => p.type === "leaf" && p.tabIds.length > 1,
+  );
+
+  const handleRequestReview = useCallback((entries: ReviewFileEntry[]) => {
+    setSettingsOpen(false);
+    setReviewEntries(entries);
+  }, []);
+
+  const rootFocusRef = useRef<HTMLDivElement>(null);
+  useFocusOnRequest("orchestrator", () => {
+    // Blur whatever iframe currently has focus, then focus the orchestrator
+    // shell root. The root has tabIndex=-1 so it can receive focus
+    // programmatically without appearing in the normal tab order.
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    rootFocusRef.current?.focus();
+  });
 
   return (
-    <div className="flex h-full flex-col bg-[#F4F4F4]">
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} initialSection={settingsSection} />
+    <div
+      ref={rootFocusRef}
+      tabIndex={-1}
+      className="flex h-full flex-col bg-[#F4F4F4] outline-none"
+    >
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        initialSection={settingsSection}
+        onRequestReview={handleRequestReview}
+      />
+      {reviewEntries && (
+        <ReviewMode
+          entries={reviewEntries}
+          onClose={() => setReviewEntries(null)}
+        />
+      )}
       <ErrorBoundary
         scope="title-bar"
         fallback={({ error, reset }) => (
-          <TitleBarErrorFallback error={error} onReset={reset} hasTabs={hasTabs} />
+          <TitleBarErrorFallback
+            error={error}
+            onReset={reset}
+            hasTabs={hasTabs}
+          />
         )}
       >
         <TitleBar
@@ -802,6 +929,7 @@ function OrchestratorContent() {
                   sessions={sessions}
                   registryMap={registryMap}
                   wsPort={wsPort}
+                  windowId={windowId!}
                   onSwitchTab={handleSwitchTab}
                   onCloseTab={handleCloseTab}
                   onCloseTabQuiet={handleCloseTabQuiet}
@@ -841,7 +969,9 @@ function ConnectedApp({
             client={connection.kyjuClient}
             replica={connection.replica}
           >
-            <OrchestratorContent />
+            <ShortcutForwarderProvider windowId={windowId!}>
+              <OrchestratorContent />
+            </ShortcutForwarderProvider>
           </KyjuProvider>
         </KyjuClientProvider>
       </EventsProvider>
@@ -869,7 +999,9 @@ export function App() {
   return (
     <ErrorBoundary
       scope="root"
-      fallback={({ error, reset }) => <FullErrorFallback error={error} onReset={reset} />}
+      fallback={({ error, reset }) => (
+        <FullErrorFallback error={error} onReset={reset} />
+      )}
     >
       <ConnectedApp connection={connection} />
     </ErrorBoundary>
