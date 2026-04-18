@@ -22,11 +22,30 @@ export type ZenbuPaths = {
 const INTERNAL_DIR = path.join(os.homedir(), ".zenbu", ".internal")
 const PATHS_JSON = path.join(INTERNAL_DIR, "paths.json")
 
+/**
+ * Per-platform user cache root (macOS: `~/Library/Caches`, Linux: respects
+ * `XDG_CACHE_HOME` else `~/.cache`, Windows: `%LOCALAPPDATA%`). We don't
+ * call `app.getPath("cache")` because Electron's typings dropped `"cache"`
+ * from the union (still works at runtime, but breaks `tsc`); doing it
+ * ourselves is also more predictable across Electron versions.
+ */
+function userCacheRoot(): string {
+  if (process.platform === "darwin") {
+    return path.join(os.homedir(), "Library", "Caches")
+  }
+  if (process.platform === "win32") {
+    return (
+      process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local")
+    )
+  }
+  return process.env.XDG_CACHE_HOME ?? path.join(os.homedir(), ".cache")
+}
+
 function computePaths(): ZenbuPaths {
-  // app.getPath("cache") returns the user cache root (e.g. ~/Library/Caches
-  // on macOS), NOT app-namespaced. Append "Zenbu" ourselves so we get
-  // ~/Library/Caches/Zenbu which matches what setup.ts writes to.
-  const cacheRoot = path.join(app.getPath("cache"), "Zenbu")
+  // We deliberately do NOT app-namespace via Electron — append "Zenbu"
+  // ourselves so we land at e.g. ~/Library/Caches/Zenbu, which matches
+  // what setup.ts (running outside Electron) writes to.
+  const cacheRoot = path.join(userCacheRoot(), "Zenbu")
   const binDir = path.join(cacheRoot, "bin")
   return {
     cacheRoot,

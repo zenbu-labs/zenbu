@@ -8,26 +8,14 @@ import { HttpService } from "./http";
 const DB_PATH = path.join(process.cwd(), ".zenbu", "db");
 const BLOBS_DIR = path.join(DB_PATH, "blobs");
 
+/**
+ * todo: delete i believe this is dead code
+ */
 export class BlobService extends Service {
   static key = "blob";
   static deps = { http: HttpService };
   declare ctx: { http: HttpService };
 
-  // lmao what the fuck is this the databse should be writing it/?
-  // async create(base64: string, mimeType: string): Promise<{ blobId: string }> {
-  //   const blobId = nanoid()
-  //   const blobDir = path.join(BLOBS_DIR, blobId)
-  //   await fsp.mkdir(blobDir, { recursive: true })
-
-  //   const data = Buffer.from(base64, "base64")
-  //   await fsp.writeFile(path.join(blobDir, "data"), data)
-  //   await fsp.writeFile(
-  //     path.join(blobDir, "index.json"),
-  //     JSON.stringify({ blobId, fileSize: data.length, mimeType }),
-  //   )
-
-  //   return { blobId }
-  // }
 
   // stupid as shit!
   async readBlob(

@@ -704,6 +704,9 @@ export class WindowService extends Service {
           ).catch(() => {});
         };
 
+        /**
+         * nonsense will be deleted
+         */
         if (!(win as any).__zenbu_close_attached) {
           (win as any).__zenbu_close_attached = true;
           win.on("close", (event: Electron.Event) => {
