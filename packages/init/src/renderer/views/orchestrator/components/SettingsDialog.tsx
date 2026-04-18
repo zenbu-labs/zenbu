@@ -913,7 +913,12 @@ type PullAndInstallResult =
       ok: true;
       updated: boolean;
       setupRan: boolean;
-      requiresRelaunch: boolean;
+      /** true while the runtime holds a staged update (setup ran, state not
+       *  yet recorded). The UI must call `commitPluginUpdate` (relaunch) or
+       *  `rollbackPluginUpdate` (git reset) to resolve. */
+      pending: boolean;
+      headBefore: string | null;
+      version: number | null;
       plugin: string;
     }
   | {
@@ -983,22 +988,37 @@ function PullAndInstallButton({
   }, [rpc, pluginName, onComplete]);
 
   const relaunch = useCallback(async () => {
+    if (!(result?.ok && result.pending && result.version != null)) return;
     setRelaunching(true);
     try {
-      await (rpc as any).runtime.quitAndRelaunch();
+      // Writes state + triggers app.relaunch(). Transport dies mid-response,
+      // that's expected.
+      await (rpc as any).gitUpdates.commitPluginUpdate({
+        plugin: result.plugin,
+        version: result.version,
+      });
     } catch {
       // process exits from under us; swallow
     }
-  }, [rpc]);
+  }, [rpc, result]);
 
-  const dismissRelaunch = useCallback(() => {
+  const dismissRelaunch = useCallback(async () => {
+    if (!(result?.ok && result.pending)) return;
+    try {
+      await (rpc as any).gitUpdates.rollbackPluginUpdate({
+        plugin: result.plugin,
+        headBefore: result.headBefore,
+      });
+    } catch (err) {
+      console.error("[PullAndInstallButton] rollback failed:", err);
+    }
     setResult((r: PullAndInstallResult | null) =>
-      r && r.ok && r.requiresRelaunch ? { ...r, requiresRelaunch: false } : r,
+      r && r.ok && r.pending ? { ...r, pending: false } : r,
     );
-  }, []);
+  }, [rpc, result]);
 
   const buttonDisabled = pending || !!disabled;
-  const relaunchDialogOpen = !!(result?.ok && result.requiresRelaunch);
+  const relaunchDialogOpen = !!(result?.ok && result.pending);
 
   return (
     <div className="space-y-2">
@@ -1017,19 +1037,19 @@ function PullAndInstallButton({
         </pre>
       )}
 
-      {result?.ok && !result.requiresRelaunch && result.setupRan && (
-        <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs">
-          Setup complete. No relaunch required.
-        </div>
-      )}
-      {result?.ok && !result.setupRan && result.updated && (
+      {result?.ok && !result.pending && !result.setupRan && result.updated && (
         <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs">
           Pulled new commits (no setup changes).
         </div>
       )}
-      {result?.ok && !result.updated && !result.setupRan && (
+      {result?.ok && !result.pending && !result.updated && !result.setupRan && (
         <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
           Up to date.
+        </div>
+      )}
+      {result?.ok && !result.pending && result.setupRan && (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+          Update was rolled back. Click Pull updates to try again.
         </div>
       )}
       {result && !result.ok && (

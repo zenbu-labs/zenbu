@@ -7,7 +7,7 @@
   "scripts": {
     "start": "dist/mac-arm64/Zenbu.app/Contents/MacOS/Zenbu",
     "build": "node scripts/build.mjs",
-    "dev": "pnpm install && node scripts/build.mjs && electron dist/main/index.js",
+    "dev": "node scripts/build.mjs && electron dist/main/index.js",
     "dist": "pnpm build && electron-builder --mac --config.mac.identity=null",
     "dist:mac": "pnpm build && electron-builder --mac",
     "dist:win": "pnpm build && electron-builder --win",

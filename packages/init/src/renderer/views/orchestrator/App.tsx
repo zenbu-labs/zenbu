@@ -316,9 +316,23 @@ function ReloadMenu() {
     }
   };
 
+  const pendingStagedRef = useRef<{
+    plugin: string;
+    version: number | null;
+    headBefore: string | null;
+  } | null>(null);
+
   const handleRelaunch = async () => {
+    const staged = pendingStagedRef.current;
     try {
-      await (rpc as any).runtime.quitAndRelaunch();
+      if (staged && staged.version != null) {
+        await (rpc as any).gitUpdates.commitPluginUpdate({
+          plugin: staged.plugin,
+          version: staged.version,
+        });
+      } else {
+        await (rpc as any).runtime.quitAndRelaunch();
+      }
     } catch {
       // process exits from under us
     }
@@ -354,12 +368,18 @@ function ReloadMenu() {
       const next: UpdateStatus = await rpc.gitUpdates.checkUpdates(true);
       setStatus(next);
       if (result?.ok) {
-        if (result.requiresRelaunch) {
-          // Deps changed -> the current process can't hot-pick-up the new
-          // node_modules. Surface a sticky "needs-relaunch" state instead of
-          // flashing; user clicks to confirm.
+        if (result.pending) {
+          // setup.ts ran but state isn't committed yet. Remember staged info
+          // so handleRelaunch knows which plugin to commit. Show sticky
+          // needs-relaunch indicator.
+          pendingStagedRef.current = {
+            plugin: result.plugin,
+            version: result.version,
+            headBefore: result.headBefore,
+          };
           setTransient("needs-relaunch");
         } else {
+          pendingStagedRef.current = null;
           flashTransient(result.updated || result.setupRan ? "updated" : "up-to-date");
         }
       } else if (result?.error) {

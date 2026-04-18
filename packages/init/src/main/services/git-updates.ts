@@ -31,6 +31,7 @@ import {
 } from "@zenbu/git"
 import fs from "node:fs"
 import { spawn } from "node:child_process"
+import { app } from "electron"
 import { Service, runtime } from "../runtime"
 import { RpcService } from "./rpc"
 import {
@@ -161,9 +162,17 @@ export type PullAndInstallResult =
       updated: boolean
       /** true if setup.ts was spawned (manifest version > stored version) */
       setupRan: boolean
-      /** true if pnpm-lock.yaml changed during setup; user must relaunch to
-       *  pick up new node_modules. */
-      requiresRelaunch: boolean
+      /** true if setup completed and the runtime is in a staged state:
+       *  git pull + setup.ts have been applied on disk, but `setupVersion`
+       *  has NOT been recorded yet and new code/deps have not been
+       *  loaded into the running process. The UI MUST call either
+       *  `commitPluginUpdate` (relaunch) or `rollbackPluginUpdate`
+       *  (git reset --hard to `headBefore`) to resolve the pending state. */
+      pending: boolean
+      /** Pre-pull git HEAD — pass to `rollbackPluginUpdate` to revert. */
+      headBefore: string | null
+      /** Declared setup.version that should be recorded on commit. */
+      version: number | null
       /** The plugin that was updated (echoed back so the UI knows). */
       plugin: string
     }
@@ -507,8 +516,10 @@ export class GitUpdatesService extends Service {
     // --- Pull ---
 
     let updated = false
+    let headBefore: string | null = null
+    const isGitRepo = await isRepo(repoDir)
     try {
-      if (await isRepo(repoDir)) {
+      if (isGitRepo) {
         const branch = await getBranch(repoDir)
         if (!branch) {
           return {
@@ -518,7 +529,7 @@ export class GitUpdatesService extends Service {
             plugin: pluginName,
           }
         }
-        const headBefore = await resolveRef(repoDir, "HEAD")
+        headBefore = await resolveRef(repoDir, "HEAD")
         await gitPull(repoDir, { ffOnly: true, remote: "origin", branch })
         const headAfter = await resolveRef(repoDir, "HEAD")
         updated = headBefore !== headAfter
@@ -542,7 +553,9 @@ export class GitUpdatesService extends Service {
         ok: true,
         updated,
         setupRan: false,
-        requiresRelaunch: false,
+        pending: false,
+        headBefore,
+        version: null,
         plugin: pluginName,
       }
     }
@@ -552,7 +565,9 @@ export class GitUpdatesService extends Service {
         ok: true,
         updated,
         setupRan: false,
-        requiresRelaunch: false,
+        pending: false,
+        headBefore,
+        version: null,
         plugin: pluginName,
       }
     }
@@ -560,6 +575,7 @@ export class GitUpdatesService extends Service {
     // --- Run setup.ts ---
 
     if (!fs.existsSync(BUN_BIN)) {
+      await this._maybeRollback(repoDir, headBefore)
       return {
         ok: false,
         error: `bun binary missing at ${BUN_BIN} — relaunch the app or reinstall`,
@@ -568,6 +584,7 @@ export class GitUpdatesService extends Service {
       }
     }
     if (!fs.existsSync(setup.scriptAbs)) {
+      await this._maybeRollback(repoDir, headBefore)
       return {
         ok: false,
         error: `setup script missing at ${setup.scriptAbs}`,
@@ -583,6 +600,7 @@ export class GitUpdatesService extends Service {
         cwd: repoDir,
       })
     } catch (err) {
+      await this._maybeRollback(repoDir, headBefore)
       return {
         ok: false,
         error: formatError(err),
@@ -591,25 +609,87 @@ export class GitUpdatesService extends Service {
       }
     }
 
-    // --- Record state ---
-
-    try {
-      recordSetupVersion(pluginName, setup.version)
-    } catch (err) {
-      return {
-        ok: false,
-        error: `state write failed: ${formatError(err)}`,
-        stage: "state",
-        plugin: pluginName,
-      }
-    }
-
+    // Staged. Deliberately DO NOT write setup-state yet — the UI must call
+    // either `commitPluginUpdate` (writes state + relaunch) or
+    // `rollbackPluginUpdate` (git reset --hard headBefore).
     return {
       ok: true,
       updated,
       setupRan: true,
-      requiresRelaunch: true,
+      pending: true,
+      headBefore,
+      version: setup.version,
       plugin: pluginName,
+    }
+  }
+
+  /**
+   * Attempt to `git reset --hard <headBefore>` in the plugin's repo. Used
+   * internally after a failed setup, and exposed via RPC for the UI to call
+   * when the user dismisses the relaunch modal.
+   */
+  private async _maybeRollback(
+    repoDir: string,
+    headBefore: string | null,
+  ): Promise<void> {
+    if (!headBefore) return
+    try {
+      if (!(await isRepo(repoDir))) return
+      await runGit(repoDir, ["reset", "--hard", headBefore])
+    } catch (err) {
+      console.error("[gitUpdates] rollback failed:", err)
+    }
+  }
+
+  /**
+   * Called by the UI after the user clicks "Relaunch now" in the relaunch
+   * modal. Writes the setup-version state and restarts the app so the new
+   * code + deps are picked up cleanly.
+   */
+  async commitPluginUpdate(opts: {
+    plugin: string
+    version: number
+  }): Promise<{ ok: true }> {
+    try {
+      recordSetupVersion(opts.plugin, opts.version)
+    } catch (err) {
+      console.error("[gitUpdates] recordSetupVersion failed:", err)
+      // Proceed with relaunch anyway — worst case, the gate re-fires on the
+      // next update.
+    }
+    queueMicrotask(() => {
+      // Fire and forget — awaiting would hang because we're tearing down the
+      // transport carrying the RPC response.
+      try {
+        app.relaunch()
+        app.exit(0)
+      } catch (err) {
+        console.error("[gitUpdates] relaunch failed:", err)
+      }
+    })
+    return { ok: true }
+  }
+
+  /**
+   * Called by the UI when the user dismisses the relaunch modal. Reverts
+   * the plugin's git worktree to `headBefore` so the running process sees
+   * its pre-pull files again. node_modules may retain extra deps that were
+   * just installed — harmless, since the now-reverted code doesn't import
+   * them.
+   */
+  async rollbackPluginUpdate(opts: {
+    plugin: string
+    headBefore: string | null
+  }): Promise<{ ok: true } | { ok: false; error: string }> {
+    const manifestPath = resolvePluginManifest(opts.plugin)
+    if (!manifestPath) return { ok: true }
+    const repoDir = resolvePluginRepoDir(manifestPath, opts.plugin)
+    try {
+      await this._maybeRollback(repoDir, opts.headBefore)
+      if (opts.plugin === "kernel") this._invalidateCache()
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: formatError(err) }
     }
   }
 
