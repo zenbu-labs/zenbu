@@ -36,6 +36,24 @@ export type InstallResult =
   | { ok: true; manifestPath: string; log: string[] }
   | { ok: false; error: string; log?: string[] }
 
+export type RepoInfo = {
+  stars: number
+  forks: number
+  defaultBranch: string
+  updatedAt: string
+  htmlUrl: string
+  description: string
+  ownerLogin: string
+}
+
+export type RepoInfoResult =
+  | { ok: true; info: RepoInfo }
+  | { ok: false; error: string }
+
+export type RepoReadmeResult =
+  | { ok: true; content: string; defaultBranch: string }
+  | { ok: false; error: string }
+
 function parseJsonl(raw: string): RegistryEntry[] {
   const entries: RegistryEntry[] = []
   for (const line of raw.split("\n")) {
@@ -184,6 +202,85 @@ export class RegistryService extends Service {
           installPath: installPathFor(e.name),
         })),
       },
+    }
+  }
+
+  async getRepoInfo(args: { repo: string }): Promise<RepoInfoResult> {
+    const parsed = parseRemoteUrl(args.repo)
+    if (!parsed) return { ok: false, error: `Unrecognised repo URL: ${args.repo}` }
+    if (parsed.host !== "github.com") {
+      return { ok: false, error: `Host ${parsed.host} not supported yet` }
+    }
+    const apiUrl = `https://api.github.com/repos/${parsed.owner}/${parsed.repo}`
+    try {
+      const response = await fetch(apiUrl, {
+        headers: {
+          Accept: "application/vnd.github+json",
+          "User-Agent": "zenbu",
+        },
+      })
+      if (!response.ok) {
+        return {
+          ok: false,
+          error: `GET ${apiUrl} → ${response.status} ${response.statusText}`,
+        }
+      }
+      const data = (await response.json()) as {
+        stargazers_count?: number
+        forks_count?: number
+        default_branch?: string
+        updated_at?: string
+        pushed_at?: string
+        html_url?: string
+        description?: string | null
+        owner?: { login?: string }
+      }
+      return {
+        ok: true,
+        info: {
+          stars: data.stargazers_count ?? 0,
+          forks: data.forks_count ?? 0,
+          defaultBranch: data.default_branch ?? "main",
+          updatedAt: data.pushed_at ?? data.updated_at ?? "",
+          htmlUrl: data.html_url ?? parsed.webUrl,
+          description: data.description ?? "",
+          ownerLogin: data.owner?.login ?? parsed.owner,
+        },
+      }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
+  async getRepoReadme(args: { repo: string }): Promise<RepoReadmeResult> {
+    const parsed = parseRemoteUrl(args.repo)
+    if (!parsed) return { ok: false, error: `Unrecognised repo URL: ${args.repo}` }
+    if (parsed.host !== "github.com") {
+      return { ok: false, error: `Host ${parsed.host} not supported yet` }
+    }
+    const apiUrl = `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/readme`
+    try {
+      const response = await fetch(apiUrl, {
+        headers: {
+          Accept: "application/vnd.github.raw+json",
+          "User-Agent": "zenbu",
+        },
+      })
+      if (response.status === 404) {
+        return { ok: false, error: "No README in this repository" }
+      }
+      if (!response.ok) {
+        return {
+          ok: false,
+          error: `GET ${apiUrl} → ${response.status} ${response.statusText}`,
+        }
+      }
+      const content = await response.text()
+      // Find default branch for resolving relative links/images later if we want to.
+      // We don't strictly need to re-fetch metadata here; callers can request it separately.
+      return { ok: true, content, defaultBranch: "" }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   }
 
