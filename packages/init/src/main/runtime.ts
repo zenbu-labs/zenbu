@@ -120,6 +120,13 @@ export class ServiceRuntime {
     }
   }
 
+  async reloadAll(): Promise<void> {
+    const keys = [...this.slots.keys()]
+    if (keys.length === 0) return
+    await this.scheduleReconcile(keys)
+    await this.whenIdle()
+  }
+
   async shutdown(): Promise<void> {
     try {
       await this.whenIdle()

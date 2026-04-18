@@ -110,6 +110,11 @@
       "idx": 21,
       "tag": "default_config_claude",
       "when": 1776468324937
+    },
+    {
+      "idx": 22,
+      "tag": "add_view_registry_meta",
+      "when": 1776470706871
     }
   ]
 }

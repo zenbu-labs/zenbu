@@ -1,5 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode, useMemo, useCallback, useState, useEffect, useRef } from "react";
-import { SearchIcon, SettingsIcon, RotateCwIcon, DownloadIcon, GitMergeIcon } from "lucide-react";
+import { SearchIcon, SettingsIcon, RotateCwIcon, DownloadIcon, GitMergeIcon, RefreshCwIcon } from "lucide-react";
 import { nanoid } from "nanoid";
 import { makeCollection } from "@zenbu/kyju/schema";
 import {
@@ -242,8 +242,20 @@ type UpdateStatus =
 function ReloadMenu() {
   const rpc = useRpc();
   const [status, setStatus] = useState<UpdateStatus | null>(null);
-  const [pending, setPending] = useState<"check" | "pull" | null>(null);
+  const [pending, setPending] = useState<"check" | "pull" | "reload" | null>(null);
   const [upToDate, setUpToDate] = useState(false);
+
+  const handleFullReload = async () => {
+    if (pending) return;
+    setPending("reload");
+    try {
+      await rpc.runtime.reload();
+    } catch (e) {
+      console.error("[orchestrator] full reload failed:", e);
+    } finally {
+      setPending(null);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -319,6 +331,17 @@ function ReloadMenu() {
         </DropdownMenuItem>
         <DropdownMenuItem
           className="text-xs"
+          disabled={pending !== null}
+          onSelect={(e) => {
+            e.preventDefault();
+            handleFullReload();
+          }}
+        >
+          <RefreshCwIcon className="size-3" />
+          {pending === "reload" ? "Reloading…" : "Full reload"}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="text-xs"
           disabled={hasConflicts || pending !== null}
           onSelect={(e) => {
             e.preventDefault();
@@ -330,7 +353,10 @@ function ReloadMenu() {
           ) : (
             <DownloadIcon className="size-3" />
           )}
-          {pullLabel}
+          <span className="flex-1">{pullLabel}</span>
+          {hasUpdates && (
+            <span className="size-1.5 rounded-full bg-blue-500" />
+          )}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -362,11 +388,6 @@ function TitleBar({
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
         <ReloadMenu />
-        <AgentPickerCombobox
-          agents={agents}
-          sessions={sessions}
-          onSelect={onLoadAgent}
-        />
         <button
           onClick={onSettings}
           className="flex h-6 w-7 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-black/10 hover:text-neutral-700"
@@ -374,21 +395,32 @@ function TitleBar({
         >
           <SettingsIcon size={14} />
         </button>
+        <AgentPickerCombobox
+          agents={agents}
+          sessions={sessions}
+          onSelect={onLoadAgent}
+        />
       </div>
       <div className="flex flex-1 items-center justify-center" />
       <div
-        className="flex shrink-0 items-center justify-end pr-2"
+        className="flex shrink-0 items-center justify-end gap-1 pr-2"
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
-        <button
-          onClick={onNew}
-          className="flex h-6 w-7 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-black/10 hover:text-neutral-700"
-          title="New Chat"
-        >
-          +
-        </button>
+        <TitleBarActions onNew={onNew} />
       </div>
     </div>
+  );
+}
+
+function TitleBarActions({ onNew }: { onNew: () => void }) {
+  return (
+    <button
+      onClick={onNew}
+      className="flex h-6 w-7 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-black/10 hover:text-neutral-700"
+      title="New Chat"
+    >
+      +
+    </button>
   );
 }
 
@@ -414,7 +446,7 @@ function OrchestratorContent() {
   );
 
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<"general" | "plugins">("plugins");
+  const [settingsSection, setSettingsSection] = useState<"general" | "registry">("registry");
   const initializedRef = useRef(false);
   const ensuredRef = useRef(false);
 
@@ -720,22 +752,10 @@ function OrchestratorContent() {
   );
 
   useEffect(() => {
-    function onMessage(e: MessageEvent) {
-      if (e.data?.type !== "zenbu-split") return;
-      const { action, agentId } = e.data;
-      const session = sessions.find((s) => s.agentId === agentId);
-      if (!session) return;
-      if (action === "new-tab") handleNewTab();
-    }
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [handleNewTab, sessions]);
-
-  useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "p") {
         e.preventDefault();
-        setSettingsSection("plugins");
+        setSettingsSection("registry");
         setSettingsOpen((prev) => !prev);
       }
     }

@@ -146,13 +146,18 @@ export const appSchema = createSchema({
   tabSidebarOpen: f.boolean().default(true),
   sidebarPanel: f.string().default("overview"),
   viewRegistry: f
-  // 
+  //
     .array(
       zod.object({
         scope: zod.string(),
         url: zod.string(),
         port: zod.number(),
         icon: zod.string().optional(),
+        meta: zod
+          .object({
+            kind: zod.string().optional(),
+          })
+          .optional(),
       }),
     )
     .default([]),

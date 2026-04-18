@@ -805,22 +805,6 @@ export class WindowService extends Service {
       });
     });
 
-    this.effect("split-shortcuts", () => {
-      return registerContentScript(
-        "chat",
-        path.resolve(
-          __dirname,
-          "..",
-          "..",
-          "renderer",
-          "views",
-          "orchestrator",
-          "advice",
-          "split-shortcuts.ts",
-        ),
-      );
-    });
-
     this.effect("devtools-shortcut", () => {
       const accelerator =
         process.platform === "darwin"

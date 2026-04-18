@@ -11,6 +11,7 @@ interface ViewEntry {
   url: string;
   port: number;
   ownsServer: boolean;
+  meta?: { kind?: string };
 }
 
 export class ViewRegistryService extends Service {
@@ -25,6 +26,7 @@ export class ViewRegistryService extends Service {
     scope: string,
     root: string,
     configFile?: string | false,
+    meta?: { kind?: string },
   ): Promise<ViewEntry> {
     const existing = this.views.get(scope);
     if (existing) return existing;
@@ -39,6 +41,7 @@ export class ViewRegistryService extends Service {
       url: reloaderEntry.url,
       port: reloaderEntry.port,
       ownsServer: true,
+      meta,
     };
     this.views.set(scope, entry);
     await this.syncToDb();
@@ -50,6 +53,7 @@ export class ViewRegistryService extends Service {
     scope: string,
     reloaderId: string,
     pathPrefix: string,
+    meta?: { kind?: string },
   ): ViewEntry {
     const existing = this.views.get(scope);
     if (existing) return existing;
@@ -65,6 +69,7 @@ export class ViewRegistryService extends Service {
       url: `${reloaderEntry.url}${pathPrefix}`,
       port: reloaderEntry.port,
       ownsServer: false,
+      meta,
     };
     this.views.set(scope, entry);
     void this.syncToDb();
@@ -132,6 +137,7 @@ export class ViewRegistryService extends Service {
       url: e.url,
       port: e.port,
       icon: this.manifestIcons.get(e.scope),
+      meta: e.meta,
     }));
     await Effect.runPromise(
       client.update((root) => {
