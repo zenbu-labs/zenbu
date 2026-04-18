@@ -1531,6 +1531,8 @@ type RegistryEntry = {
   repo: string;
   installed: boolean;
   installPath: string;
+  enabled: boolean;
+  manifestPath: string | null;
 };
 
 function displayTitle(entry: { title?: string; name: string }): string {
@@ -1766,6 +1768,19 @@ function RegistrySection() {
   const selectedMetadata = selected ? metadataByName[selected.name] : undefined;
   const selectedReadme = selected ? readmeByName[selected.name] : undefined;
 
+  const toggleEnabled = useCallback(
+    async (entry: RegistryEntry, nextEnabled: boolean) => {
+      if (!entry.manifestPath) return;
+      try {
+        await (rpc as any).installer.togglePlugin(entry.manifestPath, nextEnabled);
+        await fetchRegistry();
+      } catch (err) {
+        console.error("[settings] togglePlugin failed:", err);
+      }
+    },
+    [rpc, fetchRegistry],
+  );
+
   if (!listing && loading) {
     return (
       <div className="p-5 text-sm text-muted-foreground">Loading registry…</div>
@@ -1791,67 +1806,49 @@ function RegistrySection() {
 
   if (!listing) return null;
 
-  const sidebar = (
-    <RegistrySidebar
-      filtered={filtered}
-      selectedName={selectedName}
-      search={search}
-      setSearch={setSearch}
-      showInstalledOnly={showInstalledOnly}
-      setShowInstalledOnly={setShowInstalledOnly}
-      sortOrder={sortOrder}
-      setSortOrder={setSortOrder}
-      totalCount={listing.entries.length}
-      metadataByName={metadataByName}
-      collapsed={selected !== null}
-      onSelect={setSelectedName}
-    />
-  );
-
   return (
-    <div className="h-full flex flex-col min-h-0">
+    <div className="relative h-full flex flex-col min-h-0">
       {listing.warning && (
         <div className="shrink-0 border-b border-amber-500/30 bg-amber-500/5 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">
           {listing.warning}
         </div>
       )}
       <div className="flex-1 min-h-0 flex">
-        {selected ? (
-          <>
-            {sidebar}
-            <RegistryDetail
-              entry={selected}
-              metadata={selectedMetadata}
-              readme={selectedReadme}
-              installing={installing === selected.name}
-              installDisabled={installing !== null && installing !== selected.name}
-              onInstall={() => install(selected)}
-              onBack={() => setSelectedName(null)}
-              installOutcome={
-                installOutcome && installOutcome.name === selected.name
-                  ? installOutcome
-                  : null
-              }
-              onDismissOutcome={() => setInstallOutcome(null)}
-            />
-          </>
-        ) : (
-          <RegistryGrid
-            filtered={filtered}
-            totalCount={listing.entries.length}
-            search={search}
-            setSearch={setSearch}
-            showInstalledOnly={showInstalledOnly}
-            setShowInstalledOnly={setShowInstalledOnly}
-            sortOrder={sortOrder}
-            setSortOrder={setSortOrder}
-            metadataByName={metadataByName}
-            onSelect={setSelectedName}
-            onRefresh={fetchRegistry}
-            loading={loading}
-          />
-        )}
+        <RegistryGrid
+          filtered={filtered}
+          totalCount={listing.entries.length}
+          search={search}
+          setSearch={setSearch}
+          showInstalledOnly={showInstalledOnly}
+          setShowInstalledOnly={setShowInstalledOnly}
+          sortOrder={sortOrder}
+          setSortOrder={setSortOrder}
+          metadataByName={metadataByName}
+          onSelect={setSelectedName}
+          onRefresh={fetchRegistry}
+          loading={loading}
+        />
       </div>
+      {selected && (
+        <div className="absolute inset-0 z-20 bg-background flex flex-col min-h-0">
+          <RegistryDetail
+            entry={selected}
+            metadata={selectedMetadata}
+            readme={selectedReadme}
+            installing={installing === selected.name}
+            installDisabled={installing !== null && installing !== selected.name}
+            onInstall={() => install(selected)}
+            onToggleEnabled={(nextEnabled) => toggleEnabled(selected, nextEnabled)}
+            onBack={() => setSelectedName(null)}
+            installOutcome={
+              installOutcome && installOutcome.name === selected.name
+                ? installOutcome
+                : null
+            }
+            onDismissOutcome={() => setInstallOutcome(null)}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -2034,7 +2031,9 @@ function RegistryCard({
     >
       <div className="flex items-center gap-2 min-w-0">
         <p className="text-sm font-semibold truncate">{displayTitle(entry)}</p>
-        {entry.installed && <InstalledBadge />}
+        {entry.installed && (
+          <InstalledBadge disabled={!entry.enabled} />
+        )}
       </div>
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
         <span className="truncate">
@@ -2199,7 +2198,9 @@ function RegistrySidebarItem({
     >
       <div className="flex items-center gap-1.5 min-w-0">
         <span className="text-sm font-medium truncate">{displayTitle(entry)}</span>
-        {entry.installed && <InstalledBadge small />}
+        {entry.installed && (
+          <InstalledBadge small disabled={!entry.enabled} />
+        )}
       </div>
       <div className="text-[11px] text-muted-foreground truncate">
         {metadata?.ownerLogin
@@ -2226,17 +2227,26 @@ function RegistrySidebarItem({
   );
 }
 
-function InstalledBadge({ small = false }: { small?: boolean }) {
+function InstalledBadge({
+  small = false,
+  disabled = false,
+}: {
+  small?: boolean;
+  disabled?: boolean;
+}) {
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-sm bg-blue-500/15 text-blue-600 dark:text-blue-400 font-semibold uppercase tracking-wide",
+        "inline-flex items-center rounded-sm font-semibold uppercase tracking-wide",
+        disabled
+          ? "bg-muted text-muted-foreground"
+          : "bg-blue-500/15 text-blue-600 dark:text-blue-400",
         small
           ? "px-1 py-0 text-[8px] h-3.5"
           : "px-1.5 py-0.5 text-[9px]",
       )}
     >
-      Installed
+      {disabled ? "Disabled" : "Installed"}
     </span>
   );
 }
@@ -2248,6 +2258,7 @@ function RegistryDetail({
   installing,
   installDisabled,
   onInstall,
+  onToggleEnabled,
   onBack,
   installOutcome,
   onDismissOutcome,
@@ -2258,6 +2269,7 @@ function RegistryDetail({
   installing: boolean;
   installDisabled: boolean;
   onInstall: () => void;
+  onToggleEnabled: (nextEnabled: boolean) => void;
   onBack: () => void;
   installOutcome: InstallOutcome | null;
   onDismissOutcome: () => void;
@@ -2282,7 +2294,9 @@ function RegistryDetail({
           <div className="space-y-1.5">
             <div className="flex items-center gap-2">
               <h2 className="text-2xl font-semibold">{displayTitle(entry)}</h2>
-              {entry.installed && <InstalledBadge />}
+              {entry.installed && (
+                <InstalledBadge disabled={!entry.enabled} />
+              )}
             </div>
             <div className="text-sm text-muted-foreground space-y-0.5">
               <div className="inline-flex items-center gap-1.5">
@@ -2327,22 +2341,30 @@ function RegistryDetail({
           </div>
 
           <div className="flex items-center gap-2 pt-1">
-            <Button
-              onClick={onInstall}
-              disabled={entry.installed || installing || installDisabled}
-              className={cn(
-                "text-sm",
-                !entry.installed &&
-                  !installing &&
-                  "bg-blue-500 hover:bg-blue-600 text-white",
-              )}
-            >
-              {entry.installed
-                ? "Installed"
-                : installing
-                  ? "Installing…"
-                  : "Install"}
-            </Button>
+            {!entry.installed && (
+              <Button
+                onClick={onInstall}
+                disabled={installing || installDisabled}
+                className={cn(
+                  "text-sm",
+                  !installing && "bg-blue-500 hover:bg-blue-600 text-white",
+                )}
+              >
+                {installing ? "Installing…" : "Install"}
+              </Button>
+            )}
+            {entry.installed && entry.manifestPath && (
+              <Button
+                onClick={() => onToggleEnabled(!entry.enabled)}
+                variant={entry.enabled ? "outline" : "default"}
+                className={cn(
+                  "text-sm",
+                  !entry.enabled && "bg-blue-500 hover:bg-blue-600 text-white",
+                )}
+              >
+                {entry.enabled ? "Disable" : "Enable"}
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"

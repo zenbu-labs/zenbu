@@ -25,7 +25,14 @@ export type RegistryEntry = {
 
 export type RegistryListing = {
   source: "remote" | "local"
-  entries: Array<RegistryEntry & { installed: boolean; installPath: string }>
+  entries: Array<
+    RegistryEntry & {
+      installed: boolean
+      installPath: string
+      enabled: boolean
+      manifestPath: string | null
+    }
+  >
   warning?: string
 }
 
@@ -176,17 +183,29 @@ export class RegistryService extends Service {
   evaluate() {}
 
   async getRegistry(): Promise<RegistryResult> {
+    const statuses = this.ctx.installer.listPluginsWithStatus()
+    const byName = new Map<string, { manifestPath: string; enabled: boolean }>()
+    for (const s of statuses) {
+      byName.set(s.name, { manifestPath: s.manifestPath, enabled: s.enabled })
+    }
+    const enrich = <T extends { name: string }>(e: T) => {
+      const status = byName.get(e.name)
+      return {
+        ...e,
+        installed: isInstalled(e.name),
+        installPath: installPathFor(e.name),
+        enabled: status?.enabled ?? false,
+        manifestPath: status?.manifestPath ?? null,
+      }
+    }
+
     const remote = await fetchRemoteRegistry()
     if ("entries" in remote) {
       return {
         ok: true,
         listing: {
           source: "remote",
-          entries: remote.entries.map((e) => ({
-            ...e,
-            installed: isInstalled(e.name),
-            installPath: installPathFor(e.name),
-          })),
+          entries: remote.entries.map(enrich),
         },
       }
     }
@@ -198,11 +217,7 @@ export class RegistryService extends Service {
       listing: {
         source: "local",
         warning: `Using local registry (${remote.error})`,
-        entries: local.map((e) => ({
-          ...e,
-          installed: isInstalled(e.name),
-          installPath: installPathFor(e.name),
-        })),
+        entries: local.map(enrich),
       },
     }
   }
