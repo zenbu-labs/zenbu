@@ -28,7 +28,7 @@ live without restart.
     │   ├── packages/                # see below
     │   ├── registry.jsonl           # plugin catalog (name, description, repo)
     │   ├── DOCS.md                  # full architecture doc
-    │   └── setup.sh                 # idempotent first-run installer
+    │   └── packages/init/setup.ts   # idempotent first-run installer (run via bun)
     └── <third-party plugins>/       # each with its own zenbu.plugin.json
 ```
 
@@ -63,7 +63,7 @@ methods are auto-exposed as RPC namespaced by `static key`. Hot-reloads via
 | View ↔ scope registry | `view-registry.ts` |
 | The core (orchestrator+views) Vite server | `core-renderer.ts` |
 | Agent lifecycle, ACP proxying, first-prompt skill preamble | `agent.ts` |
-| Plugin installer (clones repo, runs setup.sh) | `installer.ts` |
+| Plugin installer (clones repo, runs setup.ts) | `installer.ts` |
 | Advice + content script config | `advice-config.ts` |
 | CLI socket (`zen` commands ↔ running app) | `cli-socket.ts`, `cli-intent.ts` |
 | File scanner (non-gitignore-aware today) | `file-scanner.ts` |
@@ -139,8 +139,8 @@ kernel over a single WebSocket that multiplexes `{ ch: "rpc" }` and
   Set by `bootstrapEnv` in `apps/kernel/src/shell/env-bootstrap.ts`.
 - Hard user-system deps: only Xcode Command Line Tools (git + bash).
 - User overrides: `ZENBU_BUN`, `ZENBU_PNPM`, `ZENBU_GIT` env vars.
-- All plugin `setup.sh` scripts inherit the isolated toolchain env.
-- Every plugin's `setup.sh` must be idempotent and use the `##ZENBU_STEP:`
+- All plugin `setup.ts` scripts inherit the isolated toolchain env.
+- Every plugin's `setup.ts` must be idempotent and use the `##ZENBU_STEP:`
   protocol for progress reporting.
 
 ## Conventions — things to do (or not) when editing
@@ -156,7 +156,7 @@ kernel over a single WebSocket that multiplexes `{ ch: "rpc" }` and
   stay typed.
 - **Run `zen kyju generate`** after changing a schema — writes a migration, a
   snapshot, and updates the journal + barrel.
-- **Run `zen doctor`** after pulling a new `setup.sh` step.
+- **Run `zen doctor`** after pulling a new `setup.ts` step (or trigger the update from the UI, which does the same thing and prompts Relaunch if deps changed).
 - Plugin registry lives at `packages/zenbu/registry.jsonl` (newline-delimited
   JSON). To publish, PR a line with your plugin's git URL.
 

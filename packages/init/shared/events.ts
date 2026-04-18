@@ -12,4 +12,8 @@ export type ZenbuEvents = {
   shortcut: {
     dispatched: { id: string; scope: string; windowId: string | null; paneId: string | null; ts: number }
   }
+  setup: {
+    /** A line of stdout/stderr from a setup.ts subprocess, streamed live. */
+    progress: { pluginName: string; line: string }
+  }
 }

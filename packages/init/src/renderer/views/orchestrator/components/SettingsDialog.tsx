@@ -41,7 +41,7 @@ import {
 } from "../../../components/ui/select";
 import { cn } from "../../../lib/utils";
 import { useDb } from "../../../lib/kyju-react";
-import { useKyjuClient, useRpc } from "../../../lib/providers";
+import { useKyjuClient, useRpc, useEvents } from "../../../lib/providers";
 import { KeybindingsSection } from "./KeybindingsSection";
 
 function useIconUrl(client: any, blobId: string | undefined) {
@@ -906,6 +906,145 @@ function Feedback({
   );
 }
 
+/* --------------------- Plugin pull + install button ---------------------- */
+
+type PullAndInstallResult =
+  | {
+      ok: true;
+      updated: boolean;
+      setupRan: boolean;
+      requiresRelaunch: boolean;
+      plugin: string;
+    }
+  | {
+      ok: false;
+      error: string;
+      stage: "lookup" | "pull" | "setup" | "state";
+      plugin: string;
+    };
+
+/**
+ * Trigger `rpc.gitUpdates.pullAndInstall({ plugin })` for a given plugin name,
+ * streaming setup.ts stdout lines into a rolling log, and surfacing a
+ * Relaunch button when the setup run changed pnpm-lock.yaml (meaning
+ * node_modules was bumped and the running process can't pick up the new
+ * versions cleanly).
+ */
+function PullAndInstallButton({
+  pluginName,
+  label = "Pull",
+  disabled,
+  disabledReason,
+  onComplete,
+}: {
+  pluginName: string;
+  label?: string;
+  disabled?: boolean;
+  disabledReason?: string;
+  onComplete?: (result: PullAndInstallResult) => void;
+}) {
+  const rpc = useRpc();
+  const events = useEvents();
+  const [pending, setPending] = useState(false);
+  const [progress, setProgress] = useState<string[]>([]);
+  const [result, setResult] = useState<PullAndInstallResult | null>(null);
+  const [relaunching, setRelaunching] = useState(false);
+
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+
+  useEffect(() => {
+    const unsub = (events as any).setup.progress.subscribe(
+      (data: { pluginName: string; line: string }) => {
+        if (!pendingRef.current) return;
+        if (data.pluginName !== pluginName) return;
+        setProgress((lines: string[]) => {
+          const next = [...lines, data.line];
+          return next.length > 200 ? next.slice(next.length - 200) : next;
+        });
+      },
+    );
+    return () => unsub();
+  }, [events, pluginName]);
+
+  const run = useCallback(async () => {
+    setPending(true);
+    setProgress([]);
+    setResult(null);
+    try {
+      const r: PullAndInstallResult = await (rpc as any).gitUpdates.pullAndInstall({
+        plugin: pluginName,
+      });
+      setResult(r);
+      onComplete?.(r);
+    } finally {
+      setPending(false);
+    }
+  }, [rpc, pluginName, onComplete]);
+
+  const relaunch = useCallback(async () => {
+    setRelaunching(true);
+    try {
+      await (rpc as any).runtime.quitAndRelaunch();
+    } catch {
+      // process exits from under us; swallow
+    }
+  }, [rpc]);
+
+  const buttonDisabled = pending || !!disabled;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        {disabledReason && disabled && (
+          <span className="text-xs text-muted-foreground">{disabledReason}</span>
+        )}
+        <Button size="sm" onClick={run} disabled={buttonDisabled}>
+          {pending ? "Updating…" : label}
+        </Button>
+        {result?.ok && result.requiresRelaunch && (
+          <Button
+            size="sm"
+            onClick={relaunch}
+            disabled={relaunching}
+            className="bg-blue-500 text-white hover:bg-blue-600"
+          >
+            {relaunching ? "Relaunching…" : "Relaunch"}
+          </Button>
+        )}
+      </div>
+
+      {(pending || progress.length > 0) && progress.length > 0 && (
+        <pre className="max-h-40 overflow-auto rounded-md border border-border bg-muted/40 p-2 text-[11px] font-mono whitespace-pre-wrap break-words">
+          {progress.join("\n")}
+        </pre>
+      )}
+
+      {result?.ok && !result.requiresRelaunch && result.setupRan && (
+        <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs">
+          Setup complete. No relaunch required.
+        </div>
+      )}
+      {result?.ok && !result.setupRan && result.updated && (
+        <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs">
+          Pulled new commits (no setup changes).
+        </div>
+      )}
+      {result?.ok && !result.updated && !result.setupRan && (
+        <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          Up to date.
+        </div>
+      )}
+      {result && !result.ok && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          <p className="font-medium">Failed ({result.stage})</p>
+          <p className="whitespace-pre-wrap break-words">{result.error}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------ Overview tab ------------------------------ */
 
 function OverviewTab({
@@ -917,12 +1056,7 @@ function OverviewTab({
   loadingUpstream: boolean;
   upstreamError: string | null;
 }) {
-  const { rpc, refreshAll, status } = ctx;
-  const pull = useMutation(async () => {
-    const result: MutationResult = await rpc.gitUpdates.pullUpdates();
-    if (result.ok) refreshAll();
-    return result;
-  });
+  const { refreshAll, status } = ctx;
 
   if (upstreamError) return <ErrorBox message={upstreamError} />;
   if (!status && loadingUpstream) {
@@ -955,18 +1089,14 @@ function OverviewTab({
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm">{statusLine}</p>
         {behind > 0 && (
-          <div className="flex items-center gap-2">
-            {pullReason && !canPull && (
-              <span className="text-xs text-muted-foreground">{pullReason}</span>
-            )}
-            <Button
-              size="sm"
-              onClick={() => pull.run()}
-              disabled={!canPull || pull.pending}
-            >
-              {pull.pending ? "Pulling…" : "Pull"}
-            </Button>
-          </div>
+          <PullAndInstallButton
+            pluginName="kernel"
+            disabled={!canPull}
+            disabledReason={pullReason}
+            onComplete={(result) => {
+              if (result.ok) refreshAll();
+            }}
+          />
         )}
       </div>
 
@@ -1015,8 +1145,6 @@ function OverviewTab({
           );
         })}
       </div>
-
-      <Feedback feedback={pull.feedback} />
     </div>
   );
 }
@@ -2510,6 +2638,18 @@ function RegistryDetail({
               Open on GitHub
             </Button>
           </div>
+
+          {entry.installed && entry.manifestPath && (
+            <div className="pt-1">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-2">
+                Update
+              </p>
+              <PullAndInstallButton
+                pluginName={entry.name}
+                label="Pull updates"
+              />
+            </div>
+          )}
 
           {installOutcome && (
             <InstallOutcomeBox

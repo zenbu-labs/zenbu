@@ -25,7 +25,7 @@ const PATHS_JSON = path.join(INTERNAL_DIR, "paths.json")
 function computePaths(): ZenbuPaths {
   // app.getPath("cache") returns the user cache root (e.g. ~/Library/Caches
   // on macOS), NOT app-namespaced. Append "Zenbu" ourselves so we get
-  // ~/Library/Caches/Zenbu which matches what setup.sh writes to.
+  // ~/Library/Caches/Zenbu which matches what setup.ts writes to.
   const cacheRoot = path.join(app.getPath("cache"), "Zenbu")
   const binDir = path.join(cacheRoot, "bin")
   return {
@@ -181,7 +181,7 @@ export type BootstrapResult = {
 export function bootstrapEnv(): BootstrapResult {
   const paths = computePaths()
 
-  // Only create the bin dir eagerly — the rest is populated lazily by setup.sh
+  // Only create the bin dir eagerly — the rest is populated lazily by setup.ts
   // when the user runs zen doctor / first-install. We don't want empty
   // BUN_INSTALL / PNPM_HOME dirs around on every launch.
   mkdirpSafe(paths.binDir)

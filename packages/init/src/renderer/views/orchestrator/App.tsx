@@ -300,9 +300,9 @@ function ReloadMenu() {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [pullPending, setPullPending] = useState<"check" | "pull" | null>(null);
   const [reloadPending, setReloadPending] = useState(false);
-  const [transient, setTransient] = useState<"updated" | "up-to-date" | null>(
-    null,
-  );
+  const [transient, setTransient] = useState<
+    "updated" | "up-to-date" | "needs-relaunch" | null
+  >(null);
 
   const handleFullReload = async () => {
     if (reloadPending) return;
@@ -313,6 +313,14 @@ function ReloadMenu() {
       console.error("[orchestrator] full reload failed:", e);
     } finally {
       setReloadPending(false);
+    }
+  };
+
+  const handleRelaunch = async () => {
+    try {
+      await (rpc as any).runtime.quitAndRelaunch();
+    } catch {
+      // process exits from under us
     }
   };
 
@@ -342,11 +350,18 @@ function ReloadMenu() {
     setTransient(null);
     setPullPending(hasUpdates ? "pull" : "check");
     try {
-      const result = await rpc.gitUpdates.pullAndInstall();
+      const result = await rpc.gitUpdates.pullAndInstall({ plugin: "kernel" });
       const next: UpdateStatus = await rpc.gitUpdates.checkUpdates(true);
       setStatus(next);
       if (result?.ok) {
-        flashTransient(result.updated ? "updated" : "up-to-date");
+        if (result.requiresRelaunch) {
+          // Deps changed -> the current process can't hot-pick-up the new
+          // node_modules. Surface a sticky "needs-relaunch" state instead of
+          // flashing; user clicks to confirm.
+          setTransient("needs-relaunch");
+        } else {
+          flashTransient(result.updated || result.setupRan ? "updated" : "up-to-date");
+        }
       } else if (result?.error) {
         console.error("[orchestrator] pullAndInstall failed:", result.error);
       }
@@ -366,6 +381,8 @@ function ReloadMenu() {
       ? "Updated!"
       : transient === "up-to-date"
       ? "Up to date"
+      : transient === "needs-relaunch"
+      ? "Relaunch required"
       : "Pull updates";
 
   return (
@@ -416,6 +433,18 @@ function ReloadMenu() {
             <span className="size-1.5 rounded-full bg-blue-500" />
           )}
         </DropdownMenuItem>
+        {transient === "needs-relaunch" && (
+          <DropdownMenuItem
+            className="text-xs text-blue-600 dark:text-blue-400"
+            onSelect={(e) => {
+              e.preventDefault();
+              handleRelaunch();
+            }}
+          >
+            <RotateCwIcon className="size-3" />
+            <span className="flex-1">Relaunch to apply</span>
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

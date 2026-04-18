@@ -30,10 +30,27 @@ import {
   type Worktree,
 } from "@zenbu/git"
 import fs from "node:fs"
+import crypto from "node:crypto"
 import { spawn } from "node:child_process"
 import { Service, runtime } from "../runtime"
+import { RpcService } from "./rpc"
+import {
+  readManifestSetup,
+  readManifestName,
+  getStoredSetupVersion,
+  recordSetupVersion,
+} from "../../../shared/plugin-setup-state"
 
 const CORE_REPO_ROOT = path.join(os.homedir(), ".zenbu", "plugins", "zenbu")
+const CONFIG_JSON = path.join(os.homedir(), ".zenbu", "config.json")
+const BUN_BIN = path.join(
+  os.homedir(),
+  "Library",
+  "Caches",
+  "Zenbu",
+  "bin",
+  "bun",
+)
 
 export type UpdateStatus =
   | { kind: "not-a-repo" }
@@ -87,30 +104,79 @@ export type FileDiff =
 const BINARY_PROBE_BYTES = 8000
 const MAX_DIFF_BYTES = 2 * 1024 * 1024
 
-function runRepoSetup(cwd: string): Promise<void> {
-  const script = path.join(cwd, "setup.sh")
-  if (!fs.existsSync(script)) return Promise.resolve()
-  return new Promise((resolve, reject) => {
-    const proc = spawn("bash", [script], {
-      cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, FORCE_COLOR: "0" },
-    })
-    let stderr = ""
-    proc.stderr.on("data", (d: Buffer) => {
-      stderr += d.toString()
-    })
-    proc.on("error", reject)
-    proc.on("close", (code) => {
-      if (code === 0) resolve()
-      else reject(new Error(`setup.sh exited ${code}: ${stderr.trim()}`))
-    })
-  })
+export type PullAndInstallOpts = {
+  /** Plugin name (as declared in the manifest). Defaults to "kernel". */
+  plugin?: string
+}
+
+export type PullAndInstallResult =
+  | {
+      ok: true
+      /** true if `git pull` moved HEAD forward */
+      updated: boolean
+      /** true if setup.ts was spawned (manifest version > stored version) */
+      setupRan: boolean
+      /** true if pnpm-lock.yaml changed during setup; user must relaunch to
+       *  pick up new node_modules. */
+      requiresRelaunch: boolean
+      /** The plugin that was updated (echoed back so the UI knows). */
+      plugin: string
+    }
+  | {
+      ok: false
+      error: string
+      stage: "lookup" | "pull" | "setup" | "state"
+      plugin: string
+    }
+
+/**
+ * Resolve a plugin name to its manifest path by scanning the user's
+ * `~/.zenbu/config.json`. The kernel is special-cased to its canonical path
+ * since the kernel manifest is always at the same place.
+ */
+function resolvePluginManifest(pluginName: string): string | null {
+  if (pluginName === "kernel") {
+    return path.join(
+      CORE_REPO_ROOT,
+      "packages",
+      "init",
+      "zenbu.plugin.json",
+    )
+  }
+  try {
+    const cfg = JSON.parse(fs.readFileSync(CONFIG_JSON, "utf8"))
+    if (!Array.isArray(cfg.plugins)) return null
+    for (const manifestPath of cfg.plugins) {
+      const name = readManifestName(manifestPath)
+      if (name === pluginName) return manifestPath
+    }
+  } catch {}
+  return null
+}
+
+/**
+ * Plugins live at the directory that contains their manifest (typically a
+ * git repo root, but for the kernel this is actually two levels up from the
+ * manifest — the repo root, not the `packages/init/` subdir).
+ */
+function resolvePluginRepoDir(manifestPath: string, pluginName: string): string {
+  if (pluginName === "kernel") return CORE_REPO_ROOT
+  return path.dirname(manifestPath)
+}
+
+function sha256File(filePath: string): string | null {
+  try {
+    const data = fs.readFileSync(filePath)
+    return crypto.createHash("sha256").update(data).digest("hex")
+  } catch {
+    return null
+  }
 }
 
 export class GitUpdatesService extends Service {
   static key = "gitUpdates"
-  static deps = {}
+  static deps = { rpc: RpcService }
+  declare ctx: { rpc: RpcService }
 
   private cache: UpdateStatus | null = null
   private cacheAt = 0
@@ -367,31 +433,190 @@ export class GitUpdatesService extends Service {
   }
 
   /**
-   * Pull upstream changes and then run the core repo's setup.sh idempotently
-   * so any new dependencies / plugin install steps land. Returns whether any
-   * commits were actually pulled so the UI can show a transient state.
+   * Pull upstream changes for a plugin and conditionally run its setup.ts
+   * (via the cached bun binary) when the manifest's declared `setup.version`
+   * has advanced beyond what's recorded in the per-machine state file.
+   *
+   * Streams setup subprocess output live via `rpc.emit.setup.progress` so the
+   * UI can render the log in real time.
+   *
+   * Returns `requiresRelaunch: true` when pnpm-lock.yaml changed during the
+   * setup run — node_modules can't hot-reload cleanly in the current electron
+   * process, so the UI should surface a Relaunch button.
    */
-  async pullAndInstall(): Promise<
-    | { ok: true; updated: boolean }
-    | { ok: false; error: string }
-  > {
-    try {
-      const branch = await getBranch(CORE_REPO_ROOT)
-      if (!branch) return { ok: false, error: "Not on a branch" }
-      const headBefore = await resolveRef(CORE_REPO_ROOT, "HEAD")
-      await gitPull(CORE_REPO_ROOT, { ffOnly: true, remote: "origin", branch })
-      const headAfter = await resolveRef(CORE_REPO_ROOT, "HEAD")
-      const updated = headBefore !== headAfter
-      this._invalidateCache()
-      try {
-        await runRepoSetup(CORE_REPO_ROOT)
-      } catch (err) {
-        return { ok: false, error: `setup.sh failed: ${formatError(err)}` }
+  async pullAndInstall(
+    opts: PullAndInstallOpts = {},
+  ): Promise<PullAndInstallResult> {
+    const pluginName = opts.plugin ?? "kernel"
+
+    const manifestPath = resolvePluginManifest(pluginName)
+    if (!manifestPath || !fs.existsSync(manifestPath)) {
+      return {
+        ok: false,
+        error: `No manifest found for plugin "${pluginName}"`,
+        stage: "lookup",
+        plugin: pluginName,
       }
-      return { ok: true, updated }
-    } catch (err) {
-      return { ok: false, error: formatError(err) }
     }
+    const repoDir = resolvePluginRepoDir(manifestPath, pluginName)
+
+    // --- Pull ---
+
+    let updated = false
+    try {
+      if (await isRepo(repoDir)) {
+        const branch = await getBranch(repoDir)
+        if (!branch) {
+          return {
+            ok: false,
+            error: "Not on a branch",
+            stage: "pull",
+            plugin: pluginName,
+          }
+        }
+        const headBefore = await resolveRef(repoDir, "HEAD")
+        await gitPull(repoDir, { ffOnly: true, remote: "origin", branch })
+        const headAfter = await resolveRef(repoDir, "HEAD")
+        updated = headBefore !== headAfter
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        error: `pull failed: ${formatError(err)}`,
+        stage: "pull",
+        plugin: pluginName,
+      }
+    }
+    if (pluginName === "kernel") this._invalidateCache()
+
+    // --- Gate: declared setup.version vs stored ---
+
+    const setup = readManifestSetup(manifestPath)
+    if (!setup) {
+      // No setup declared; plugin doesn't need any host configuration.
+      return {
+        ok: true,
+        updated,
+        setupRan: false,
+        requiresRelaunch: false,
+        plugin: pluginName,
+      }
+    }
+    const stored = getStoredSetupVersion(pluginName)
+    if (setup.version <= stored) {
+      return {
+        ok: true,
+        updated,
+        setupRan: false,
+        requiresRelaunch: false,
+        plugin: pluginName,
+      }
+    }
+
+    // --- Run setup.ts ---
+
+    if (!fs.existsSync(BUN_BIN)) {
+      return {
+        ok: false,
+        error: `bun binary missing at ${BUN_BIN} — relaunch the app or reinstall`,
+        stage: "setup",
+        plugin: pluginName,
+      }
+    }
+    if (!fs.existsSync(setup.scriptAbs)) {
+      return {
+        ok: false,
+        error: `setup script missing at ${setup.scriptAbs}`,
+        stage: "setup",
+        plugin: pluginName,
+      }
+    }
+
+    const lockPath = path.join(repoDir, "pnpm-lock.yaml")
+    const lockBefore = sha256File(lockPath)
+
+    try {
+      await this._runSetupScript({
+        pluginName,
+        scriptAbs: setup.scriptAbs,
+        cwd: repoDir,
+      })
+    } catch (err) {
+      return {
+        ok: false,
+        error: formatError(err),
+        stage: "setup",
+        plugin: pluginName,
+      }
+    }
+
+    // --- Record state ---
+
+    try {
+      recordSetupVersion(pluginName, setup.version)
+    } catch (err) {
+      return {
+        ok: false,
+        error: `state write failed: ${formatError(err)}`,
+        stage: "state",
+        plugin: pluginName,
+      }
+    }
+
+    const lockAfter = sha256File(lockPath)
+    const requiresRelaunch = lockBefore !== lockAfter
+
+    return {
+      ok: true,
+      updated,
+      setupRan: true,
+      requiresRelaunch,
+      plugin: pluginName,
+    }
+  }
+
+  private _runSetupScript(args: {
+    pluginName: string
+    scriptAbs: string
+    cwd: string
+  }): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn(BUN_BIN, [args.scriptAbs], {
+        cwd: args.cwd,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, FORCE_COLOR: "0" },
+      })
+      let stderrBuf = ""
+
+      const streamChunk = (chunk: string, saveStderr: boolean) => {
+        if (saveStderr) stderrBuf += chunk
+        for (const raw of chunk.split(/\r?\n/)) {
+          const line = raw.trimEnd()
+          if (!line) continue
+          try {
+            this.ctx.rpc.emit.setup.progress({
+              pluginName: args.pluginName,
+              line,
+            })
+          } catch {}
+        }
+      }
+      proc.stdout.on("data", (d: Buffer) => streamChunk(d.toString(), false))
+      proc.stderr.on("data", (d: Buffer) => streamChunk(d.toString(), true))
+
+      proc.on("error", reject)
+      proc.on("close", (code) => {
+        if (code === 0) resolve()
+        else
+          reject(
+            new Error(
+              `setup exited ${code}${
+                stderrBuf.trim() ? `: ${stderrBuf.trim()}` : ""
+              }`,
+            ),
+          )
+      })
+    })
   }
 
   async commitChanges(opts: { message: string }): Promise<MutationResult> {

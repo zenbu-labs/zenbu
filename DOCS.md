@@ -86,8 +86,11 @@ zenbu/
 │   ├── codex-app-server-context/
 │   └── effect-context/
 ├── registry.jsonl              # Plugin catalog (name, description, git repo)
-├── setup.sh                    # First-run dependency installation
 └── package.json                # Monorepo root: `start` runs the shell
+
+The kernel's setup script lives at `packages/init/setup.ts` (Bun script, run by
+the cached bun binary). Third-party plugins ship their own `setup.ts` at the
+plugin root when they need one.
 ```
 
 Key packages and their roles:
@@ -114,7 +117,7 @@ The shell is intentionally minimal. It is the only code that gets compiled ahead
 
 `apps/kernel/src/shell/index.ts`:
 
-1. **Bootstrap check**: If `~/.zenbu/plugins/zenbu` is missing or has no `node_modules`, show the setup UI (`src/setup/index.html`) which git-clones the repo and runs `setup.sh`.
+1. **Bootstrap check**: If `~/.zenbu/plugins/zenbu` is missing, or the cached bun binary is missing, or the repo has no `node_modules`, show the setup UI (`src/setup/index.html`). It performs (1) git clone + bun binary download, then (2) runs `bun packages/init/setup.ts` for the rest.
 
 2. **Read config**: Load `~/.zenbu/config.json` which lists plugin manifest paths. If empty, auto-add the kernel manifest (`packages/init/zenbu.plugin.json`).
 
@@ -357,14 +360,16 @@ Because `config.json` and each manifest file are watched by dynohot, the entire 
 
 The simplest path: clone a repo with a `zenbu.plugin.json`, add its manifest path to `~/.zenbu/config.json`. The service runtime handles the rest.
 
-### Plugin `setup.sh` requirement
+### Plugin `setup.ts` (optional)
 
-Every plugin (including the kernel) must ship an idempotent `setup.sh` at its repo root. The installer service (`packages/init/src/main/services/installer.ts`) runs it with `bash setup.sh` on install. Because it runs under the kernel's environment (Phase 0's `bootstrapEnv` in `apps/kernel/src/shell/env-bootstrap.ts` has already exported `BUN_INSTALL`, `PNPM_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and prepended `~/Library/Caches/Zenbu/bin` to `PATH`), any `pnpm install` / `bun` invocation inside a plugin's setup.sh uses Zenbu's isolated toolchain by default.
+Plugins that need one-time host setup (install deps, download binaries, configure external paths) declare `"setup": { "script": "./setup.ts", "version": N }` in their manifest and ship a `setup.ts` at the plugin root. The installer service (`packages/init/src/main/services/installer.ts`) runs it with the cached bun binary (`~/Library/Caches/Zenbu/bin/bun`). Because the kernel's `bootstrapEnv` (`apps/kernel/src/shell/env-bootstrap.ts`) has already exported `BUN_INSTALL`, `PNPM_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and prepended the cache bin to `PATH`, any `pnpm install` / `bun` invocation inside a plugin's setup.ts uses Zenbu's isolated toolchain by default.
 
-Requirements for a plugin's setup.sh:
+The runtime only runs `setup.ts` when the manifest's declared `setup.version` is greater than the version recorded in `~/.zenbu/.internal/plugin-setup-state.json`. Bump `version` when your script needs to re-run on existing installs.
+
+Requirements:
 - Idempotent — every step must be safe to re-run. Check state first, no-op if satisfied, perform the action otherwise.
-- Fail fast on hard errors (`set -euo pipefail`).
-- Emit `##ZENBU_STEP:` protocol lines if the plugin wants to show structured progress in the installer UI. Format: `##ZENBU_STEP:start:<step-id>:<title>` / `done:<step-id>` / `error:<step-id>:<msg>` / `offer-install:<tool>:<cmd>`. Other stdout is shown as a rolling log. See `setup.sh` in this repo for the canonical example.
+- Run as a subprocess via `bun` — never block the main thread.
+- Emit `##ZENBU_STEP:` protocol lines if the plugin wants to show structured progress in the installer UI. Format: `##ZENBU_STEP:start:<step-id>:<title>` / `done:<step-id>` / `error:<step-id>:<msg>` / `offer-install:<tool>:<cmd>`. Other stdout is shown as a rolling log. See `packages/init/setup.ts` in this repo for the canonical example.
 
 ---
 
@@ -1116,7 +1121,7 @@ The registry is a git-tracked file in this repo. To add a plugin, you make a PR 
 
 ## CLI
 
-**Binary:** `zen` (shell shim at `~/.zenbu/bin/zen` — added to the user's shell rc by `setup.sh`)
+**Binary:** `zen` (shell shim at `~/.zenbu/bin/zen` — added to the user's shell rc by `setup.ts`)
 **Source:** `packages/zen/src/bin.ts` — hot-editable TypeScript. The shim execs the Zenbu-isolated bun on the source file, so edits take effect on the next invocation.
 
 ### Subcommands
@@ -1127,12 +1132,12 @@ The registry is a git-tracked file in this repo. To add a plugin, you make a PR 
 | `zen [--agent <name>] [--resume] [--blocking] [--verbose]` | Same, with window-open flags. |
 | `zen kyju <args...>` | Proxy to the kyju CLI (runs from source via our bun). `zen kyju generate` replaces the old `pnpm kyju:generate`. `zen kyju db root`, `zen kyju db collections`, etc. inspect the on-disk DB. |
 | `zen link` | Regenerate `~/.zenbu/registry/{services,db-sections}.ts` from the plugin manifest in the current directory. Replaces the old `bun run ~/.zenbu/link.js`. |
-| `zen doctor` | Re-run `setup.sh` idempotently. Use this after `git pull` pulls in new setup steps or after removing `~/Library/Caches/Zenbu/`. Every `ensure_*` step either no-ops or repairs. |
+| `zen doctor` | Re-run `setup.ts` idempotently. Use this after `git pull` pulls in new setup steps or after removing `~/Library/Caches/Zenbu/`. Every `ensure*` step either no-ops or repairs. |
 | `zen config get <key>` / `set <key> <value>` | Read/write the kyju `zen-cli` section (`packages/zen/shared/schema.ts`). Currently just `appPath` (the Electron binary the CLI spawns). |
 
 ### zen-cli kyju section
 
-The CLI owns its own kyju section (name: `"zen-cli"`). Schema at `packages/zen/shared/schema.ts`, migrations at `packages/zen/kyju/`. Registered in `~/.zenbu/config.json` by `setup.sh`'s `ensure_kernel_manifest_registered`. Reads/writes in `zen config` go directly to `packages/init/.zenbu/db/root.json` under `plugin["zen-cli"]`.
+The CLI owns its own kyju section (name: `"zen-cli"`). Schema at `packages/zen/shared/schema.ts`, migrations at `packages/zen/kyju/`. Registered in `~/.zenbu/config.json` by `setup.ts`'s `ensureKernelManifestRegistered`. Reads/writes in `zen config` go directly to `packages/init/.zenbu/db/root.json` under `plugin["zen-cli"]`.
 
 ---
 
@@ -1160,7 +1165,7 @@ XDG_STATE_HOME=~/Library/Caches/Zenbu/xdg/state
 PATH=~/Library/Caches/Zenbu/bin:<user tool paths>:<existing PATH>
 ```
 
-These are exported before any `child_process.spawn`, so `setup.sh`, plugin installs, agents, and `git pull` all see the isolated toolchain.
+These are exported before any `child_process.spawn`, so `setup.ts`, plugin installs, agents, and `git pull` all see the isolated toolchain.
 
 ### User overrides
 
@@ -1179,9 +1184,9 @@ Two screens may appear before the main setup window:
 - **DMG read-only** (`apps/kernel/src/setup/preflight-dmg.html`): shown when `app.getAppPath()` resolves under `/Volumes/`. User must drag to `/Applications`.
 - **Xcode CLI tools missing** (`preflight-xcode.html`): shown when `xcode-select -p` fails or git is a stub. Triggers the macOS installer and polls every 2s until it finishes.
 
-### Plugin setup.sh inherits
+### Plugin setup.ts inherits
 
-Because `bootstrapEnv()` runs before any loader registration, plugin `setup.sh` invocations via the installer service also inherit our env vars and bin PATH. Plugin authors get Zenbu's `pnpm` + `bun` for free without any extra wiring.
+Because `bootstrapEnv()` runs before any loader registration, plugin `setup.ts` invocations via the installer service also inherit our env vars and bin PATH. Plugin authors get Zenbu's `pnpm` + `bun` for free without any extra wiring.
 
 ---
 
@@ -1196,9 +1201,9 @@ Because the app is just a git repo cloned to `~/.zenbu/plugins/zenbu`, updating 
 3. Changed files trigger dynohot's file watcher → services re-evaluate, Vite HMR updates views.
 4. The app is now running the latest code.
 
-### When `setup.sh` changes
+### When a plugin's `setup.ts` changes
 
-If a `git pull` pulls in changes to `setup.sh` (new `ensure_*` step, new pinned tool version, etc.), run `zen doctor` to re-apply the installer. Every step is idempotent; already-satisfied steps log `✓` and no-op. Auto-rerunning setup.sh on every launch is intentionally **not** currently wired — considered future work.
+When the plugin author bumps `setup.version` in the manifest, the next UI-triggered update (via the Updates tab or the per-plugin Update button) will spawn the plugin's `setup.ts` through the cached bun binary, stream progress into the settings dialog, and prompt a Relaunch if `pnpm-lock.yaml` was modified. Auto-run on every launch is intentionally **not** wired — updates are explicit user actions. Power users can also bypass the UI with `zen doctor` which re-runs the core's setup.ts idempotently.
 
 ### Agent-Assisted Merge Conflicts
 

@@ -42,7 +42,7 @@ my-plugin/
 ├── package.json
 ├── tsconfig.json
 ├── zenbu.plugin.json
-├── setup.sh              (optional)
+├── setup.ts              (optional — run via bun by the installer)
 └── src/
     └── services/
         └── my-service.ts
@@ -52,9 +52,14 @@ my-plugin/
 
 ```json
 {
+  "name": "my-plugin",
   "services": [
     "src/services/*.ts"
-  ]
+  ],
+  "setup": {
+    "script": "./setup.ts",
+    "version": 1
+  }
 }
 ```
 
@@ -62,6 +67,10 @@ The `services` array supports:
 - **Globs**: `"src/services/*.ts"` — all `.ts` files in the directory
 - **Direct paths**: `"src/services/specific.ts"`
 - **Nested manifests**: `"other/zenbu.plugin.json"` — recursively loads another manifest
+
+The optional `setup` field declares a one-time host setup script. The runtime runs it via the cached bun binary when the declared `version` is greater than what's recorded in `~/.zenbu/.internal/plugin-setup-state.json` for this plugin. Bump `version` whenever your `setup.ts` needs to re-run on existing installs (new dependencies, new binaries to download, new host config, etc). Forward-only: rolling `version` back is a no-op.
+
+A future `setup.permissions` field is planned as an extension point — plugin authors will declare the host capabilities the setup script needs (filesystem writes outside the plugin dir, network access, subprocess spawning), and the UI will confirm before running. Not implemented yet; setup runs unconditionally.
 
 ### 3. Write `package.json`
 
@@ -130,19 +139,26 @@ static deps = { db: "db" }
 declare ctx: { db: any }
 ```
 
-### 6. (Optional) Write `setup.sh`
+### 6. (Optional) Write `setup.ts`
 
-If your plugin has dependencies that need installation:
+If your plugin has one-time host setup (install deps, download binaries, configure external paths), write a `setup.ts` in the plugin root:
 
-```bash
-#!/bin/bash
-set -e
-echo "Installing my-plugin dependencies..."
-pnpm install
-echo "Setup complete."
+```typescript
+#!/usr/bin/env bun
+import { $ } from "bun"
+
+await $`pnpm install`
+// ... anything else your plugin needs once per machine ...
 ```
 
-The `InstallerService` will run this when `node_modules` is missing under the plugin root.
+Register it in the manifest via `"setup": { "script": "./setup.ts", "version": 1 }`. The runtime spawns it via the bun binary in `~/Library/Caches/Zenbu/bin/bun` when:
+
+- The plugin is freshly installed (no recorded version in state)
+- The manifest's `version` is bumped above what the state file has recorded
+
+When the script exits with code 0, the runtime records the new version. If the script happened to modify `pnpm-lock.yaml` inside your plugin's directory, the Updates UI shows a Relaunch button (new `node_modules` won't hot-reload cleanly; the app needs a restart to pick them up).
+
+Scripts run as subprocesses so they never block the main electron thread.
 
 ### 7. Install the Plugin
 
@@ -216,7 +232,7 @@ export default defineConfig({
 
 This single import gives you CSS variables, base styles, and Tailwind class scanning for all UI components — the `@source` directives inside `shadcn.css` use relative paths that resolve correctly regardless of where your plugin lives.
 
-**TypeScript (IDE):** `tsconfig.local.json` is gitignored and generated per machine (by `setup.sh` or manually). It maps `@testbu/*` to the local monorepo path for IDE type-checking.
+**TypeScript (IDE):** `tsconfig.local.json` is gitignored and generated per machine (by `setup.ts` or manually). It maps `@testbu/*` to the local monorepo path for IDE type-checking.
 
 ## Checklist
 

@@ -314,14 +314,35 @@ export class InstallerService extends Service {
   }
 
   async runSetup(onProgress: (message: string) => void): Promise<boolean> {
-    const setupScript = path.join(this.pluginRoot, "setup.sh")
-    if (!fs.existsSync(setupScript)) {
+    // Historically this ran `bash setup.sh`. The new convention is
+    // `bun setup.ts` driven by the plugin's manifest setup.script field.
+    // Accept either (setup.ts preferred) so legacy plugin repos still work.
+    const setupTs = path.join(this.pluginRoot, "setup.ts")
+    const setupSh = path.join(this.pluginRoot, "setup.sh")
+    const bunBin = path.join(
+      os.homedir(),
+      "Library",
+      "Caches",
+      "Zenbu",
+      "bin",
+      "bun",
+    )
+
+    let cmd: string
+    let args: string[]
+    if (fs.existsSync(setupTs) && fs.existsSync(bunBin)) {
+      cmd = bunBin
+      args = [setupTs]
+    } else if (fs.existsSync(setupSh)) {
+      cmd = "bash"
+      args = [setupSh]
+    } else {
       onProgress("No setup script found")
       return false
     }
 
     return new Promise((resolve, reject) => {
-      const proc = spawn("bash", [setupScript], {
+      const proc = spawn(cmd, args, {
         cwd: this.pluginRoot,
         stdio: ["ignore", "pipe", "pipe"],
         env: { ...process.env, FORCE_COLOR: "0" },

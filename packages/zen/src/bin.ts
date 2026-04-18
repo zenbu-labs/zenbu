@@ -19,7 +19,7 @@ Usage:
   zen [--agent <name>] [--resume] [--blocking]   Open a Zenbu window
   zen kyju <generate|db> [...]                   Run the kyju CLI
   zen link                                       Regenerate registry types
-  zen doctor                                     Re-run setup.sh (idempotent)
+  zen doctor                                     Re-run setup.ts (idempotent)
   zen config <get|set> <key> [value]             Read/write CLI config
 `)
 }

@@ -38,8 +38,8 @@ You can clone anywhere, but `~/.zenbu/plugins/` is the conventional location.
 
 ```bash
 cd ~/.zenbu/plugins/<plugin-name>
-# if the plugin has a setup.sh:
-bash setup.sh
+# if the plugin has a setup.ts:
+~/Library/Caches/Zenbu/bin/bun setup.ts
 # otherwise:
 pnpm install   # or npm install, etc.
 ```

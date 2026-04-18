@@ -133,13 +133,25 @@ function isInstalled(name: string): boolean {
   return fs.existsSync(installPathFor(name))
 }
 
+const BUN_BIN = path.join(
+  os.homedir(),
+  "Library",
+  "Caches",
+  "Zenbu",
+  "bin",
+  "bun",
+)
+
 function runSetupScript(
   cwd: string,
   script: string,
   onLog: (line: string) => void,
 ): Promise<void> {
+  // Prefer bun for .ts scripts; fall back to bash for legacy .sh.
+  const isTs = script.endsWith(".ts")
+  const cmd = isTs ? BUN_BIN : "bash"
   return new Promise((resolve, reject) => {
-    const proc = spawn("bash", [script], {
+    const proc = spawn(cmd, [script], {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, FORCE_COLOR: "0" },
@@ -155,7 +167,10 @@ function runSetupScript(
     proc.on("error", reject)
     proc.on("close", (code) => {
       if (code === 0) resolve()
-      else reject(new Error(`setup.sh exited with code ${code}`))
+      else
+        reject(
+          new Error(`${path.basename(script)} exited with code ${code}`),
+        )
     })
   })
 }
@@ -328,12 +343,17 @@ export class RegistryService extends Service {
       append(`Manifest: ${manifest}`)
 
       const manifestDir = path.dirname(manifest)
-      const setupScript = path.join(manifestDir, "setup.sh")
-      if (fs.existsSync(setupScript)) {
-        append(`Running setup.sh…`)
+      // Prefer setup.ts (new convention); fall back to setup.sh for legacy.
+      const setupTs = path.join(manifestDir, "setup.ts")
+      const setupSh = path.join(manifestDir, "setup.sh")
+      let setupScript: string | null = null
+      if (fs.existsSync(setupTs)) setupScript = setupTs
+      else if (fs.existsSync(setupSh)) setupScript = setupSh
+      if (setupScript) {
+        append(`Running ${path.basename(setupScript)}…`)
         await runSetupScript(manifestDir, setupScript, append)
       } else {
-        append("No setup.sh (skipping)")
+        append("No setup script (skipping)")
       }
 
       this.ctx.installer.addPluginToConfig(manifest)
