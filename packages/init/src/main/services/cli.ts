@@ -59,7 +59,7 @@ export class CliService extends Service {
   private pendingRelaunches = new Map<string, (d: RelaunchDecision) => void>();
 
   ping() {
-    return { ok: true, pid: process.pid, wsPort: this.ctx.http.port , extra: 'testing observe me'};
+    return { ok: true, pid: process.pid, wsPort: this.ctx.http.port , extra: ' observe me'};
   }
 
   listAgents() {
