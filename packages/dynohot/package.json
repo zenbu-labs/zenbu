@@ -30,6 +30,7 @@
 		"@babel/generator": "^7.26.9",
 		"@babel/traverse": "^7.26.9",
 		"@braidai/lang": "^1.0.0",
+		"@parcel/watcher": "^2.5.0",
 		"convert-source-map": "^2.0.0",
 		"tslib": "^2.8.1"
 	},

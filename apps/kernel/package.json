@@ -81,6 +81,7 @@
   },
   "dependencies": {
     "@esbuild/darwin-arm64": "^0.25.0",
+    "@parcel/watcher": "^2.5.0",
     "@tailwindcss/vite": "^4",
     "@vitejs/plugin-react": "^5.0.0",
     "@zenbu/advice": "workspace:*",

@@ -1,27 +1,32 @@
-import * as fs from "node:fs";
-import * as fsPromises from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { subscribe, type AsyncSubscription } from "@parcel/watcher";
 import { isWatcherPathPaused, registerWatcherClosable } from "./pause.js";
 import { debounceAsync } from "./utility.js";
 
-// Q: Why don't you use chokidar?
-// A: https://github.com/paulmillr/chokidar#persistence
-// """
-//     If set to false when using fsevents to watch, no more events will be emitted after ready, even if
-//     the process continues to run.
-// """
-// I guess there is no way to unref?
+// Q: Why @parcel/watcher instead of node:fs.watch?
+// A: Node's fs.watch on macOS is a thin wrapper over FSEvents and has
+// documented reliability holes: it drops events or delivers
+// `filename=null` for atomic rename-replace (the pattern git uses, and
+// many editors use for atomic saves). Result: editing a file via
+// `git pull` — or any rename-replace — silently skipped the watcher
+// and dynohot never reloaded. @parcel/watcher is the native FSEvents
+// wrapper VSCode, Vite, Parcel, Tailwind's JIT, etc. all use. It
+// normalizes OS events into clean { type, path } batches with no
+// null-filename drops and correct rename-replace handling.
 
-// This is the same approach TypeScript takes via `createUseFsEventsOnParentDirectoryWatchFile`
 interface DirectoryWatcher {
 	callbacksByFile: Map<string, CallbacksByFile>;
-	watcher: fs.FSWatcher;
+	closable: Closable;
 }
 
 interface CallbacksByFile {
 	callbacks: Set<() => void>;
 	dispatch: () => Promise<void>;
+}
+
+interface Closable {
+	close(): void;
 }
 
 /** @internal */
@@ -38,22 +43,34 @@ export class FileWatcher {
 		// Initialize directory watcher
 		const directoryWatcher = this.watchers.get(directory) ?? (() => {
 			const callbacksByFile = new Map<string, CallbacksByFile>();
-			const watcher = fs.watch(
-				directory,
-				{ persistent: false },
-				(type, fileName) => {
-					if (fileName !== null) {
-						const callbacks = callbacksByFile.get(fileName);
-						void callbacks?.dispatch();
-					}
+			// `subscribe` is recursive; filter to direct children of
+			// `directory` so semantics match the previous fs.watch(dir).
+			let subscription: AsyncSubscription | null = null;
+			let closed = false;
+			void subscribe(directory, (err, events) => {
+				if (err) return;
+				for (const event of events) {
+					if (dirname(event.path) !== directory) continue;
+					const byFile = callbacksByFile.get(basename(event.path));
+					if (byFile) void byFile.dispatch();
+				}
+			}).then((sub) => {
+				if (closed) void sub.unsubscribe().catch(() => {});
+				else subscription = sub;
+			}).catch((err: unknown) => {
+				console.error(`[dynohot] watch failed for ${directory}:`, err);
+			});
+			const closable: Closable = {
+				close: () => {
+					closed = true;
+					if (subscription) void subscription.unsubscribe().catch(() => {});
 				},
-			);
-			watcher.unref();
+			};
 			// Track for process-wide shutdown — see `pause.ts`.
-			const deregister = registerWatcherClosable(watcher);
+			const deregister = registerWatcherClosable(closable);
 			const holder: DirectoryWatcher & { deregister: () => void } = {
 				callbacksByFile,
-				watcher,
+				closable,
 				deregister,
 			};
 			this.watchers.set(directory, holder);
@@ -61,29 +78,15 @@ export class FileWatcher {
 		})();
 		// Initialize by-file callback holder
 		const byFile = directoryWatcher.callbacksByFile.get(fileName) ?? function() {
-			let stat: fs.Stats | null = null;
 			const callbacks = new Set<() => void>();
 			const dispatch = debounceAsync(async () => {
-				const nextStat = await fsPromises.stat(path).catch(() => null);
-				const previousStat = stat;
-				stat = nextStat ?? previousStat;
-				// If a caller has paused this path, absorb the stat change so
-				// callbacks DO NOT fire. The baseline mtime advances forward
-				// so that once the caller resumes (or reverts the files back
-				// to their pre-pause state), the very next genuine change
-				// re-triggers callbacks as normal.
+				// If a caller has paused this path (e.g. during git
+				// pull + pnpm install), suppress callbacks until resume.
 				if (isWatcherPathPaused(path)) return;
-				if (!previousStat || !nextStat) {
-					return;
-				}
-				if (previousStat.mtimeMs === nextStat.mtimeMs) {
-					return;
-				}
 				for (const callback of callbacks) {
 					callback();
 				}
 			});
-			void dispatch();
 			const byFile = { callbacks, dispatch };
 			directoryWatcher.callbacksByFile.set(fileName, byFile);
 			return byFile;
@@ -92,11 +95,14 @@ export class FileWatcher {
 		return () => {
 			byFile.callbacks.delete(callback);
 			if (byFile.callbacks.size === 0) {
-				this.watchers.delete(directory);
-				directoryWatcher.watcher.close();
-				(directoryWatcher as DirectoryWatcher & {
-					deregister?: () => void;
-				}).deregister?.();
+				directoryWatcher.callbacksByFile.delete(fileName);
+				if (directoryWatcher.callbacksByFile.size === 0) {
+					this.watchers.delete(directory);
+					directoryWatcher.closable.close();
+					(directoryWatcher as DirectoryWatcher & {
+						deregister?: () => void;
+					}).deregister?.();
+				}
 			}
 		};
 	}

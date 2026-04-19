@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
+import { subscribe } from "@parcel/watcher"
 import { registerWatcherClosable } from "dynohot/pause"
 
 function parseJsonc(str) {
@@ -46,7 +47,7 @@ function expandGlob(pattern) {
 
 // Barrel URL -> { hot, globs: [{dir, regex, snapshot: Set<string>}] }
 const barrels = new Map()
-// Directory -> fs.FSWatcher (one watcher per directory, fanned out to barrels)
+// Directory -> Closable (one subscription per directory, fanned out to barrels)
 const dirWatchers = new Map()
 
 function snapshotDir(dir, regex) {
@@ -58,40 +59,61 @@ function snapshotDir(dir, regex) {
   }
 }
 
+function handleDirEvent(dir, filename) {
+  for (const entry of barrels.values()) {
+    for (const glob of entry.globs) {
+      if (glob.dir !== dir) continue
+      if (!glob.regex.test(filename)) continue
+      const nextSnapshot = snapshotDir(dir, glob.regex)
+      const changed =
+        nextSnapshot.size !== glob.snapshot.size ||
+        [...nextSnapshot].some(f => !glob.snapshot.has(f))
+      if (!changed) continue
+      glob.snapshot = nextSnapshot
+      try {
+        entry.hot?.invalidate?.()
+        console.log(`[zenbu-loader] invalidated barrel (${filename} added/removed in ${dir})`)
+      } catch (err) {
+        console.error("[zenbu-loader] invalidate failed:", err)
+      }
+      break
+    }
+  }
+}
+
+// Node's fs.watch drops rename-replace events on macOS (git pull,
+// atomic editor saves) — see dynohot/runtime/watcher.ts for full
+// context. @parcel/watcher is the same native FSEvents wrapper VSCode
+// uses and handles those cases cleanly.
 function ensureDirWatcher(dir) {
   if (dirWatchers.has(dir)) return
   if (!fs.existsSync(dir)) return
-  try {
-    const watcher = fs.watch(dir, { persistent: false }, (_event, filename) => {
-      if (!filename) return
-      for (const entry of barrels.values()) {
-        for (const glob of entry.globs) {
-          if (glob.dir !== dir) continue
-          if (!glob.regex.test(filename)) continue
-          const nextSnapshot = snapshotDir(dir, glob.regex)
-          const changed =
-            nextSnapshot.size !== glob.snapshot.size ||
-            [...nextSnapshot].some(f => !glob.snapshot.has(f))
-          if (!changed) continue
-          glob.snapshot = nextSnapshot
-          try {
-            entry.hot?.invalidate?.()
-            console.log(`[zenbu-loader] invalidated barrel (${filename} added/removed in ${dir})`)
-          } catch (err) {
-            console.error("[zenbu-loader] invalidate failed:", err)
-          }
-          break
-        }
-      }
-    })
-    watcher.unref()
-    // Track for process-wide shutdown so FSEvents doesn't fire into a
-    // dying V8 isolate on app.quit(). See dynohot/pause.
-    registerWatcherClosable(watcher)
-    dirWatchers.set(dir, watcher)
-  } catch (err) {
-    console.error(`[zenbu-loader] fs.watch failed for ${dir}:`, err)
+  let subscription = null
+  let closed = false
+  subscribe(dir, (err, events) => {
+    if (err) return
+    for (const event of events) {
+      // `subscribe` is recursive; only act on direct children of
+      // `dir` so semantics match the previous fs.watch(dir) usage.
+      if (path.dirname(event.path) !== dir) continue
+      handleDirEvent(dir, path.basename(event.path))
+    }
+  }).then(sub => {
+    if (closed) void sub.unsubscribe().catch(() => {})
+    else subscription = sub
+  }).catch(err => {
+    console.error(`[zenbu-loader] subscribe failed for ${dir}:`, err)
+  })
+  const closable = {
+    close: () => {
+      closed = true
+      if (subscription) void subscription.unsubscribe().catch(() => {})
+    },
   }
+  // Track for process-wide shutdown so the native watcher tears down
+  // before the V8 isolate dies on app.quit(). See dynohot/pause.
+  registerWatcherClosable(closable)
+  dirWatchers.set(dir, closable)
 }
 
 function buildSource(imports) {
