@@ -1,7 +1,11 @@
 import zod from "zod";
 import type { Effect } from "effect";
 import type { SessionUpdate } from "@agentclientprotocol/sdk";
-import type { EffectCollectionNode, KyjuError } from "@zenbu/kyju";
+import type {
+  EffectCollectionNode,
+  EffectArrayFieldNode,
+  KyjuError,
+} from "@zenbu/kyju";
 import {
   createSchema,
   f,
@@ -11,10 +15,19 @@ import {
 
 export const HOT_AGENT_CAP = 100;
 
+const userPromptImageSchema = zod.object({
+  blobId: zod.string(),
+  mimeType: zod.string(),
+});
+
 export const agentEventSchema = zod.object({
   timestamp: zod.number(),
   data: zod.union([
-    zod.object({ kind: zod.literal("user_prompt"), text: zod.string() }),
+    zod.object({
+      kind: zod.literal("user_prompt"),
+      text: zod.string(),
+      images: zod.array(userPromptImageSchema).optional(),
+    }),
     zod.object({ kind: zod.literal("session_update"), update: zod.any() }),
     zod.object({ kind: zod.literal("interrupted") }),
     zod.object({
@@ -31,13 +44,43 @@ export const agentEventSchema = zod.object({
       kind: zod.literal("resume_session"),
       sessionId: zod.string(),
     }),
+    // Permission flow: the agent writes `permission_request` when ACP asks
+    // whether a tool call should proceed. The UI renders the request from
+    // the event log and, on user input, writes `permission_response` back
+    // into the same event log. The Agent class subscribes to its own
+    // eventLog and pairs requests with responses via `requestId`.
+    zod.object({
+      kind: zod.literal("permission_request"),
+      requestId: zod.string(),
+      toolCall: zod.any(),
+      options: zod.any(),
+    }),
+    zod.object({
+      kind: zod.literal("permission_response"),
+      requestId: zod.string(),
+      outcome: zod.union([
+        zod.object({ outcome: zod.literal("cancelled") }),
+        zod.object({
+          outcome: zod.literal("selected"),
+          optionId: zod.string(),
+        }),
+      ]),
+    }),
   ]),
 });
+
+export type PermissionOutcome =
+  | { outcome: "cancelled" }
+  | { outcome: "selected"; optionId: string };
 
 export type AgentEvent = {
   timestamp: number;
   data:
-    | { kind: "user_prompt"; text: string }
+    | {
+        kind: "user_prompt";
+        text: string;
+        images?: { blobId: string; mimeType: string }[];
+      }
     | { kind: "session_update"; update: SessionUpdate }
     | { kind: "interrupted" }
     | { kind: "initialize"; agentCapabilities?: unknown }
@@ -47,7 +90,18 @@ export type AgentEvent = {
         configOptions?: unknown;
         modes?: unknown;
       }
-    | { kind: "resume_session"; sessionId: string };
+    | { kind: "resume_session"; sessionId: string }
+    | {
+        kind: "permission_request";
+        requestId: string;
+        toolCall: unknown;
+        options: unknown;
+      }
+    | {
+        kind: "permission_response";
+        requestId: string;
+        outcome: PermissionOutcome;
+      };
 };
 
 export const agentTitleSchema = zod.discriminatedUnion("kind", [
@@ -57,6 +111,49 @@ export const agentTitleSchema = zod.discriminatedUnion("kind", [
 ]);
 
 export type AgentTitle = zod.infer<typeof agentTitleSchema>;
+
+const configOptionSchema = zod.object({
+  value: zod.string(),
+  name: zod.string(),
+  description: zod.string().optional(),
+});
+export type ConfigOption = zod.infer<typeof configOptionSchema>;
+
+/**
+ * Per-kind "default configuration": the user's most recent selection for
+ * each axis (model / thinkingLevel / mode), scoped to this agent kind. Set
+ * whenever the user picks a value via the composer toolbar, so:
+ *
+ *   - A brand-new agent of this kind pre-populates its instance selection
+ *     from here (no ACP round-trip needed before the UI shows something
+ *     sensible).
+ *   - Switching an existing agent's `configId` reads the new kind's
+ *     `defaultConfiguration` to seed the instance.
+ *
+ * Both the instance field (`agents[i].model`) and the template default
+ * (`agentConfigs[configId].defaultConfiguration.model`) are written on
+ * every toolbar change — two sources of truth for two different
+ * questions ("what is this agent set to now?" vs "what should a newly
+ * spawned agent of this kind default to?").
+ */
+const configSelectionSchema = zod.object({
+  model: zod.string().optional(),
+  thinkingLevel: zod.string().optional(),
+  mode: zod.string().optional(),
+});
+export type ConfigSelection = zod.infer<typeof configSelectionSchema>;
+
+export const agentConfigSchema = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  startCommand: zod.string(),
+  availableModels: zod.array(configOptionSchema).default([]),
+  availableThinkingLevels: zod.array(configOptionSchema).default([]),
+  availableModes: zod.array(configOptionSchema).default([]),
+  defaultConfiguration: configSelectionSchema.default({}),
+  iconBlobId: zod.string().optional(),
+});
+export type AgentConfigRecord = zod.infer<typeof agentConfigSchema>;
 
 const agentRecordBase = {
   id: zod.string(),
@@ -69,6 +166,7 @@ const agentRecordBase = {
   model: zod.string().optional(),
   thinkingLevel: zod.string().optional(),
   mode: zod.string().optional(),
+  reloadMode: zod.enum(["continue", "keep-alive"]).default("keep-alive"),
   title: agentTitleSchema.default({ kind: "not-available" }),
   lastUserMessageAt: zod.number().optional(),
   lastFinishedAt: zod.number().optional(),
@@ -88,6 +186,7 @@ export const archivedAgentRecordSchema = zod.object({
 export type ArchivedAgentRecord = zod.infer<typeof archivedAgentRecordSchema>;
 
 export const agentSchemaFragment = {
+  agentConfigs: f.array(agentConfigSchema).default([]),
   agents: f.array(agentRecordSchema).default([]),
   archivedAgents: f.collection(archivedAgentRecordSchema, {
     debugName: "archivedAgents",
@@ -104,13 +203,18 @@ export type AgentRoot = InferRoot<AgentSchema>;
  * Minimum DB surface the Agent class needs from a Kyju-backed host.
  *
  * The host (typically the kernel) composes `agentSchemaFragment` into its
- * section and constructs this adapter pointing at that section. Callers can
- * cast their section-scoped client; structurally the kernel's
- * `client.plugin.<section>` fits the expected shape for the fields we read/
- * write, and `readRoot()` / `update()` project onto the same section.
+ * section. The host's section-scoped effect-client (e.g.
+ * `kernelClient.plugin.kernel`) structurally satisfies this shape because the
+ * kernel schema is a superset of `agentSchemaFragment`. No adapter needed —
+ * the client is passed directly.
+ *
+ * Shape mirrors the relevant slice of `EffectClientProxy<typeof
+ * agentSchemaFragment>`: readRoot/update + per-field effect nodes for the
+ * collections we append to.
  */
 export type AgentDb = {
   readRoot(): AgentRoot;
   update(fn: (root: AgentRoot) => void): Effect.Effect<void, KyjuError>;
+  agents: EffectArrayFieldNode<AgentRecord[], AgentRecord>;
   archivedAgents: EffectCollectionNode<ArchivedAgentRecord>;
 };

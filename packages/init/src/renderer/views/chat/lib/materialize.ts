@@ -1,4 +1,4 @@
-import type { SessionUpdate } from "@agentclientprotocol/sdk";
+import type { AgentEvent } from "@zenbu/agent/src/schema";
 
 export type ToolCallContentItem =
   | { type: "text"; text: string }
@@ -14,7 +14,10 @@ export type PlanEntry = {
 
 export type PermissionOption = {
   optionId: string;
-  label: string;
+  // ACP's canonical field name (see @agentclientprotocol/sdk
+  // PermissionOption). Not `label` — the empty-pill rendering bug was
+  // because we were reading the wrong field.
+  name: string;
   kind: "allow_once" | "allow_always" | "reject_once" | "reject_always";
 };
 
@@ -24,7 +27,12 @@ export type AuthMethodInfo = {
   description?: string;
   type?: "agent" | "env_var" | "terminal";
   link?: string;
-  vars?: { name: string; label?: string; secret?: boolean; optional?: boolean }[];
+  vars?: {
+    name: string;
+    label?: string;
+    secret?: boolean;
+    optional?: boolean;
+  }[];
   args?: string[];
   env?: Record<string, string>;
 };
@@ -49,18 +57,31 @@ export type ToolMessageData = MessageIdentity & {
 };
 
 export type MaterializedMessage =
-  | (MessageIdentity & { role: "user"; content: string; images?: { blobId: string; mimeType: string }[]; timeSent?: number })
+  | (MessageIdentity & {
+      role: "user";
+      content: string;
+      images?: { blobId: string; mimeType: string }[];
+      timeSent?: number;
+    })
   | (MessageIdentity & { role: "assistant"; content: string })
   | (MessageIdentity & { role: "thinking"; content: string })
   | ToolMessageData
   | (MessageIdentity & { role: "plan"; entries: PlanEntry[] })
   | (MessageIdentity & {
       role: "permission_request";
+      /** Stable id used to pair a request with its later response event. */
+      requestId: string;
       toolCallId: string;
       title: string;
       kind: string;
       description: string;
       options: PermissionOption[];
+      /**
+       * User's answer, if a matching `permission_response` event has been
+       * observed. `undefined` while the prompt is still waiting for input.
+       */
+      selectedOptionId?: string;
+      cancelled?: boolean;
     })
   | (MessageIdentity & {
       role: "ask_question";
@@ -73,14 +94,6 @@ export type MaterializedMessage =
       status: string;
       authMethods: AuthMethodInfo[];
     });
-
-type AgentEvent = {
-  timestamp: number;
-  data:
-    | { kind: "user_prompt"; text: string; images?: { blobId: string; mimeType: string }[] }
-    | { kind: "session_update"; update: SessionUpdate }
-    | { kind: "interrupted" };
-};
 
 function extractText(content: unknown): string {
   if (!content || typeof content !== "object") return "";
@@ -188,14 +201,22 @@ function hashString(value: string): string {
 
 function createMessageSeed(event: AgentEvent): string {
   if (event.data.kind === "user_prompt") {
-    const imageSeed = event.data.images
-      ?.map((image) => `${image.blobId}:${image.mimeType}`)
-      .join("|") ?? "";
+    const imageSeed =
+      event.data.images
+        ?.map((image) => `${image.blobId}:${image.mimeType}`)
+        .join("|") ?? "";
     return `user_prompt:${event.data.text}:${imageSeed}`;
   }
 
   if (event.data.kind === "interrupted") {
     return "interrupted";
+  }
+
+  // Synthetic metadata kinds: use the kind name as the seed. They never
+  // materialize into visible messages but still need a stable key so keyed
+  // lists don't panic.
+  if (event.data.kind !== "session_update") {
+    return `${event.data.kind}:${event.timestamp}`;
   }
 
   const update = event.data.update as any;
@@ -204,11 +225,19 @@ function createMessageSeed(event: AgentEvent): string {
     return `${update?.sessionUpdate ?? "unknown"}:${content.text ?? ""}`;
   }
   if (content?.type === "image") {
-    return `${update?.sessionUpdate ?? "unknown"}:image:${content.mimeType ?? ""}:${content.uri ?? ""}:${content.data?.length ?? 0}`;
+    return `${update?.sessionUpdate ?? "unknown"}:image:${
+      content.mimeType ?? ""
+    }:${content.uri ?? ""}:${content.data?.length ?? 0}`;
   }
-  return `${update?.sessionUpdate ?? "unknown"}:${typeof content === "string" ? content : ""}`;
+  return `${update?.sessionUpdate ?? "unknown"}:${
+    typeof content === "string" ? content : ""
+  }`;
 }
 
+/**
+ * 
+ * todo: investigate this im very sus
+ */
 function createStableEventKey(prefix: string, event: AgentEvent): string {
   return `${prefix}-${event.timestamp}-${hashString(createMessageSeed(event))}`;
 }
@@ -245,6 +274,48 @@ export function materializeMessages(
       });
       continue;
     }
+
+    if (event.data.kind === "permission_request") {
+      const { requestId, toolCall, options } = event.data;
+      const tc = (toolCall ?? {}) as any;
+      messages.push({
+        key: createStableEventKey(`perm:${requestId}`, event),
+        role: "permission_request",
+        requestId,
+        toolCallId: tc.toolCallId ?? requestId,
+        title: tc.title ?? "Permission requested",
+        kind: tc.kind ?? "other",
+        description: tc.rawInput
+          ? JSON.stringify(tc.rawInput)
+          : tc.title ?? "",
+        options: Array.isArray(options) ? (options as PermissionOption[]) : [],
+      });
+      continue;
+    }
+
+    if (event.data.kind === "permission_response") {
+      // Fold the response into the earlier request message so the UI can
+      // switch from "buttons" to "you chose X" view on the same row.
+      const { requestId, outcome } = event.data;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        if (m.role === "permission_request" && m.requestId === requestId) {
+          if (outcome.outcome === "selected") {
+            m.selectedOptionId = outcome.optionId;
+          } else {
+            m.cancelled = true;
+          }
+          break;
+        }
+      }
+      continue;
+    }
+
+    // Synthetic lifecycle events (`initialize`, `new_session`,
+    // `resume_session`) carry no `update` payload — they're metadata-only
+    // markers the agent writes to document its own state transitions. The
+    // chat UI has nothing to render for them.
+    if (event.data.kind !== "session_update") continue;
 
     const update = event.data.update;
 
@@ -329,7 +400,8 @@ export function materializeMessages(
           if (update.status) existing.status = update.status;
           if ((update as any).kind) {
             existing.kind = (update as any).kind;
-            if ((existing.toolName || metaToolName).toLowerCase() === "write") existing.kind = "create";
+            if ((existing.toolName || metaToolName).toLowerCase() === "write")
+              existing.kind = "create";
           }
           if (newItems.length > 0) {
             // Edit emits a diff twice for the same path: once in `tool_call`
@@ -339,14 +411,18 @@ export function materializeMessages(
             // diffs for that path so only the latest rendering survives.
             const newDiffPaths = new Set(
               newItems
-                .filter((c): c is ToolCallContentItem & { type: "diff" } => c.type === "diff")
+                .filter(
+                  (c): c is ToolCallContentItem & { type: "diff" } =>
+                    c.type === "diff",
+                )
                 .map((c) => c.path),
             );
-            const retained = newDiffPaths.size > 0
-              ? existing.contentItems.filter(
-                  (c) => !(c.type === "diff" && newDiffPaths.has(c.path)),
-                )
-              : existing.contentItems;
+            const retained =
+              newDiffPaths.size > 0
+                ? existing.contentItems.filter(
+                    (c) => !(c.type === "diff" && newDiffPaths.has(c.path)),
+                  )
+                : existing.contentItems;
             existing.contentItems = [...retained, ...newItems];
           }
           if (rawOut !== undefined) existing.rawOutput = rawOut;
@@ -360,7 +436,8 @@ export function materializeMessages(
           );
         } else {
           let kind: string = (update as any).kind ?? "other";
-          if (metaToolName.toLowerCase() === "write" && kind !== "create") kind = "create";
+          if (metaToolName.toLowerCase() === "write" && kind !== "create")
+            kind = "create";
           const strippedTitle = stripShellWrapper(update.title ?? "Tool call");
           const tc: ToolMessage = {
             key: `tool-${update.toolCallId}`,

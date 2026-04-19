@@ -3,8 +3,7 @@ import { nanoid } from "nanoid";
 import { unlinkSync, existsSync } from "node:fs";
 import type * as acp from "@agentclientprotocol/sdk";
 import { AcpClient, type AcpClientConfig, PROTOCOL_VERSION } from "./client.ts";
-import type { EventLog } from "./event-log.ts";
-import type { AgentStore } from "./store.ts";
+import type { AgentDb, AgentEvent, ConfigOption } from "./schema.ts";
 import { getMcpSocketPath } from "./mcp/socket-path.ts";
 import { writeProxyScript } from "./mcp/proxy-template.ts";
 import { TerminalManager } from "./terminal.ts";
@@ -26,36 +25,124 @@ export type BeforeCreateListener = (
 ) => Promise<void>;
 export type DestroyListener = (agentId: string, socketPath: string) => void;
 
-/**
- * Durable check for "has this agent ever been prompted before". Used to gate
- * the `firstPromptPreamble` so the preamble only fires on the truly-first
- * prompt — including surviving process restarts. If omitted, "first" is
- * scoped to this Agent instance (a fresh process forgets).
- */
-export type FirstPromptLatch = {
-  hasFired: () => Effect.Effect<boolean, unknown>;
-  markFired: () => Effect.Effect<void, unknown>;
-};
-
 export type AgentConfig = {
   id?: string;
   clientConfig: AcpClientConfig;
   cwd: string;
   mcpServers?: acp.McpServer[];
-  eventLog: EventLog;
-  store: AgentStore;
-  onConfigOptions?: (options: any[]) => void;
-  onConfigChange?: (options: any[]) => void;
+  /**
+   * Kyju-backed persistence. Structurally, the host's section-scoped
+   * effect-client (e.g. `kernelClient.plugin.kernel`) satisfies this shape.
+   * When omitted the agent runs in ephemeral mode: sessionId + first-prompt
+   * latch live in-memory only, event log writes are no-ops, and no
+   * agent/config record state is synced to the DB.
+   */
+  db?: AgentDb;
+  /**
+   * Absolute path to a node-compatible runtime (node, bun, etc.) used to
+   * execute the MCP proxy script. The proxy is a small `require("net")` CJS
+   * shim that bridges stdio to the agent's unix socket.
+   *
+   * If omitted, the proxy MCP server is not registered
+   */
+  mcpProxyCommand?: string;
+  /**
+   * Called when the agent transitions between states. Pure observer — the
+   * Agent class handles its own DB state sync (status/processState fields
+   * on the agent record) when `db` is present.
+   */
   onStateChange?: (state: AgentState) => void;
+  /**
+   * Called for every ACP session update the agent receives. Used by one-shot
+   * sub-agents (e.g. title summarization) that need to observe the stream
+   * but don't persist anything. In the default flow the DB-backed event log
+   * is the observer.
+   */
+  onSessionUpdate?: (update: acp.SessionUpdate) => void;
   /**
    * Invoked once on the first prompt to this agent. Returned content blocks
    * are prepended to the user's prompt. Use for skill routing metadata or
    * other "system-prompt-ish" preamble that ACP has no first-class slot for.
    * Blocks the send until it resolves; failures are non-fatal (logged).
+   *
+   * The "has this already fired" decision is durable via `db` when present
+   * (checks / writes `firstPromptSentAt` on the agent record); otherwise
+   * scoped to this Agent instance.
    */
   firstPromptPreamble?: () => Effect.Effect<acp.ContentBlock[], unknown>;
-  firstPromptLatch?: FirstPromptLatch;
 };
+
+type AcpConfigExtract = {
+  availableModels: ConfigOption[];
+  availableThinkingLevels: ConfigOption[];
+  availableModes: ConfigOption[];
+  defaultModel: string;
+  defaultThinkingLevel: string;
+  defaultMode: string;
+};
+
+/** Extract structured values from the raw ACP configOptions array. */
+function extractAcpConfig(acpOptions: any[]): AcpConfigExtract {
+  const modelOpt = acpOptions.find(
+    (o: any) => o.category === "model" && o.type === "select",
+  );
+  const thinkingOpt = acpOptions.find(
+    (o: any) => o.category === "thought_level" && o.type === "select",
+  );
+  const modeOpt = acpOptions.find(
+    (o: any) => o.category === "mode" && o.type === "select",
+  );
+  const mapOptions = (options: any[]): ConfigOption[] =>
+    options
+      .filter((o: any) => "value" in o)
+      .map((o: any) => ({
+        value: o.value,
+        name: o.name,
+        ...(typeof o.description === "string" && o.description
+          ? { description: o.description }
+          : {}),
+      }));
+  return {
+    availableModels: modelOpt ? mapOptions(modelOpt.options ?? []) : [],
+    availableThinkingLevels: thinkingOpt
+      ? mapOptions(thinkingOpt.options ?? [])
+      : [],
+    availableModes: modeOpt ? mapOptions(modeOpt.options ?? []) : [],
+    defaultModel: modelOpt?.currentValue ?? "",
+    defaultThinkingLevel: thinkingOpt?.currentValue ?? "",
+    defaultMode: modeOpt?.currentValue ?? "",
+  };
+}
+
+/** If the agent's current selection is no longer valid against ACP's
+ * available options, snap back to the new default. Mutates in place. */
+function reconcileInstanceSelections(
+  agent: { model?: string; thinkingLevel?: string; mode?: string },
+  extracted: AcpConfigExtract,
+) {
+  if (agent.model && extracted.availableModels.length > 0) {
+    if (!extracted.availableModels.some((m) => m.value === agent.model)) {
+      agent.model =
+        extracted.defaultModel || extracted.availableModels[0]?.value;
+    }
+  }
+  if (agent.thinkingLevel && extracted.availableThinkingLevels.length > 0) {
+    if (
+      !extracted.availableThinkingLevels.some(
+        (t) => t.value === agent.thinkingLevel,
+      )
+    ) {
+      agent.thinkingLevel =
+        extracted.defaultThinkingLevel ||
+        extracted.availableThinkingLevels[0]?.value;
+    }
+  }
+  if (agent.mode && extracted.availableModes.length > 0) {
+    if (!extracted.availableModes.some((m) => m.value === agent.mode)) {
+      agent.mode = extracted.defaultMode || extracted.availableModes[0]?.value;
+    }
+  }
+}
 
 export class Agent {
   private static beforeCreateListeners = new Set<BeforeCreateListener>();
@@ -82,24 +169,37 @@ export class Agent {
   private initDeferred: Deferred.Deferred<void>;
   private client: AcpClient;
   private clientConfig: AcpClientConfig;
-  private eventLog: EventLog;
-  private store: AgentStore;
+  private db: AgentDb | undefined;
   private cwd: string;
   private mcpServers: acp.McpServer[];
-  private onConfigOptions?: (options: any[]) => void;
-  private onConfigChange?: (options: any[]) => void;
   private onStateChange?: (state: AgentState) => void;
+  private onSessionUpdate?: (update: acp.SessionUpdate) => void;
   private _terminalManager: TerminalManager;
   private initialContextRef: Ref.Ref<acp.ContentBlock[] | null>;
-  private firstPromptPreamble?: () => Effect.Effect<acp.ContentBlock[], unknown>;
-  private firstPromptLatch?: FirstPromptLatch;
-  // In-memory fallback latch used when firstPromptLatch is not provided.
-  private _inMemoryFirstFired = false;
+  private firstPromptPreamble?: () => Effect.Effect<
+    acp.ContentBlock[],
+    unknown
+  >;
+  // Ephemeral-mode fallbacks used when `db` is absent.
+  private _ephemeralSessionId: string | null = null;
+  private _ephemeralFirstFired = false;
   private supportsLoadSession = false;
   private pendingHandoffContext: string | null = null;
-  private eventBuffer: Array<{ timestamp: number; data: any }> = [];
+  private eventBuffer: AgentEvent[] = [];
 
   private _unsubSessionUpdate: (() => void) | null = null;
+  private _unsubEventLog: (() => void) | null = null;
+
+  /**
+   * Pending permission requests awaiting a `permission_response` event in
+   * the event log. When the request goes out we stash a deferred here keyed
+   * by requestId; our eventLog subscription resolves it when the user (or
+   * any writer) records the response.
+   */
+  private _pendingPermissions = new Map<
+    string,
+    (outcome: import("./schema.ts").PermissionOutcome) => void
+  >();
 
   private constructor(
     id: string,
@@ -109,17 +209,14 @@ export class Agent {
     initDeferred: Deferred.Deferred<void>,
     client: AcpClient,
     clientConfig: AcpClientConfig,
-    eventLog: EventLog,
-    store: AgentStore,
+    db: AgentDb | undefined,
     cwd: string,
     mcpServers: acp.McpServer[],
     terminalManager: TerminalManager,
     initialContextRef: Ref.Ref<acp.ContentBlock[] | null>,
-    onConfigOptions?: (options: any[]) => void,
-    onConfigChange?: (options: any[]) => void,
     onStateChange?: (state: AgentState) => void,
+    onSessionUpdate?: (update: acp.SessionUpdate) => void,
     firstPromptPreamble?: () => Effect.Effect<acp.ContentBlock[], unknown>,
-    firstPromptLatch?: FirstPromptLatch,
   ) {
     this.id = id;
     this.socketPath = socketPath;
@@ -128,45 +225,124 @@ export class Agent {
     this.initDeferred = initDeferred;
     this.client = client;
     this.clientConfig = clientConfig;
-    this.eventLog = eventLog;
-    this.store = store;
+    this.db = db;
     this.cwd = cwd;
     this.mcpServers = mcpServers;
     this._terminalManager = terminalManager;
     this.initialContextRef = initialContextRef;
-    this.onConfigOptions = onConfigOptions;
-    this.onConfigChange = onConfigChange;
     this.onStateChange = onStateChange;
+    this.onSessionUpdate = onSessionUpdate;
     this.firstPromptPreamble = firstPromptPreamble;
-    this.firstPromptLatch = firstPromptLatch;
+  }
+
+  /**
+   * Session/first-prompt/event-log persistence — consolidated from the old
+   * AgentStore/EventLog/FirstPromptLatch interfaces. All four methods
+   * no-op cleanly when `db` is absent (ephemeral mode).
+   */
+  private _getSessionId(): string | null {
+    if (this.db) {
+      return (
+        this.db.readRoot().agents.find((a) => a.id === this.id)?.sessionId ??
+        null
+      );
+    }
+    return this._ephemeralSessionId;
+  }
+
+  private _setSessionId(sessionId: string | null): Effect.Effect<void, never> {
+    if (!this.db) {
+      this._ephemeralSessionId = sessionId;
+      return Effect.void;
+    }
+    return this.db
+      .update((root) => {
+        const a = root.agents.find((x) => x.id === this.id);
+        if (a) a.sessionId = sessionId;
+      })
+      .pipe(
+        Effect.tapError((err) =>
+          Effect.sync(() =>
+            console.warn(`[agent ${this.id}] setSessionId failed:`, err),
+          ),
+        ),
+        Effect.catchAll(() => Effect.void),
+      );
+  }
+
+  private _firstPromptHasFired(): boolean {
+    if (this.db) {
+      return (
+        this.db.readRoot().agents.find((a) => a.id === this.id)
+          ?.firstPromptSentAt != null
+      );
+    }
+    return this._ephemeralFirstFired;
+  }
+
+  private _firstPromptMarkFired(): Effect.Effect<void, never> {
+    if (!this.db) {
+      this._ephemeralFirstFired = true;
+      return Effect.void;
+    }
+    return this.db
+      .update((root) => {
+        const a = root.agents.find((x) => x.id === this.id);
+        if (a) a.firstPromptSentAt = Date.now();
+      })
+      .pipe(
+        Effect.tapError((err) =>
+          Effect.sync(() =>
+            console.warn(
+              `[agent ${this.id}] firstPrompt markFired failed:`,
+              err,
+            ),
+          ),
+        ),
+        Effect.catchAll(() => Effect.void),
+      );
+  }
+
+  private _appendEventLog(events: AgentEvent[]): void {
+    if (!this.db || events.length === 0) return;
+    const node = this.db.agents.find((a) => a.id === this.id);
+    if (!node) return;
+    Effect.runFork(
+      node.eventLog.concat(events).pipe(
+        Effect.tapError((err) =>
+          Effect.sync(() =>
+            console.warn(`[agent ${this.id}] eventLog.concat failed:`, err),
+          ),
+        ),
+        Effect.catchAll(() => Effect.void),
+      ),
+    );
   }
 
   private _subscribeSessionUpdates() {
     this._unsubSessionUpdate?.();
     this._unsubSessionUpdate = this.client.onSessionUpdate(
       (e: acp.SessionNotification) => {
-        this.eventBuffer.push({
+        const event: AgentEvent = {
           timestamp: Date.now(),
-          data: { kind: "session_update" as const, update: e.update },
-        });
-        Effect.runFork(this.eventLog.append([e.update]));
+          data: { kind: "session_update", update: e.update },
+        };
+        this.eventBuffer.push(event);
+        this._appendEventLog([event]);
+        this.onSessionUpdate?.(e.update);
 
         const update = e.update as any;
-        if (update?.configOptions && this.onConfigChange) {
-          this.onConfigChange(update.configOptions);
+        if (update?.configOptions) {
+          Effect.runFork(this._reconcileConfigChange(update.configOptions));
         }
       },
     );
   }
 
-  private _logSyntheticEvent(kind: string, data: any) {
-    const event = { timestamp: Date.now(), data: { kind, ...data } };
+  private _logSyntheticEvent(data: AgentEvent["data"]) {
+    const event: AgentEvent = { timestamp: Date.now(), data };
     this.eventBuffer.push(event);
-    Effect.runFork(
-      this.eventLog
-        .append([event.data])
-        .pipe(Effect.catchAll(() => Effect.void)),
-    );
+    this._appendEventLog([event]);
   }
 
   private _setState = (state: AgentState) => {
@@ -174,14 +350,222 @@ export class Agent {
     return Effect.gen(function* () {
       yield* Ref.set(agent.stateRef, state);
       agent.onStateChange?.(state);
+      // Sync the state projection onto the agent's DB record:
+      //   processState: string form of the state machine kind
+      //   status:       "streaming" while prompting, "idle" otherwise
+      //   lastFinishedAt: timestamp of the last transition away from "prompting"
+      if (agent.db) {
+        const status: "idle" | "streaming" =
+          state.kind === "prompting" ? "streaming" : "idle";
+        yield* agent.db
+          .update((root) => {
+            const a = root.agents.find((x) => x.id === agent.id);
+            if (!a) return;
+            a.processState = state.kind;
+            const previousStatus = a.status;
+            a.status = status;
+            if (previousStatus === "streaming" && status === "idle") {
+              a.lastFinishedAt = Date.now();
+            }
+          })
+          .pipe(
+            Effect.tapError((err) =>
+              Effect.sync(() =>
+                console.warn(`[agent ${agent.id}] state sync failed:`, err),
+              ),
+            ),
+            Effect.catchAll(() => Effect.void),
+          );
+      }
+    });
+  };
+
+  /**
+   * Reconcile ACP-advertised config options with the DB on session start.
+   *
+   * ACP sends `configOptions` in its newSession response; this is our
+   * authoritative list of available models / thinking levels / modes. We:
+   *   - Overwrite the template's availableModels/ThinkingLevels/Modes so the
+   *     UI reflects what ACP currently offers.
+   *   - Seed defaults onto the agent instance for any currently-unset fields.
+   *   - Re-validate all sibling agents sharing the same configId (e.g. stale
+   *     `model` values get snapped to the new default if removed).
+   *   - Push the user's pre-existing selections back to ACP when they're
+   *     still in the available set (e.g. we remember "gpt-5" across session
+   *     re-inits).
+   */
+  private _reconcileConfigOptions = (
+    options: any[],
+    sessionId: string,
+  ): Effect.Effect<void, never> => {
+    const agent = this;
+    return Effect.gen(function* () {
+      if (!agent.db) return;
+      const extracted = extractAcpConfig(options);
+
+      const preExisting = agent.db
+        .readRoot()
+        .agents.find((a) => a.id === agent.id);
+      const preModel = preExisting?.model;
+      const preThinking = preExisting?.thinkingLevel;
+      const preMode = preExisting?.mode;
+
+      yield* agent.db
+        .update((root) => {
+          const instance = root.agents.find((a) => a.id === agent.id);
+          const configId = instance?.configId;
+          if (configId) {
+            const template = root.agentConfigs.find((c) => c.id === configId);
+            if (template) {
+              template.availableModels = extracted.availableModels;
+              template.availableThinkingLevels =
+                extracted.availableThinkingLevels;
+              template.availableModes = extracted.availableModes;
+              // Bootstrap the template's defaultConfiguration on first
+              // handshake for this kind — so newly-created agents have
+              // something to seed from before the user has ever picked a
+              // value explicitly. The user's own toolbar selections (via
+              // setSessionConfigOption) still take precedence because they
+              // overwrite these fields unconditionally.
+              if (!template.defaultConfiguration) {
+                template.defaultConfiguration = {};
+              }
+              if (!template.defaultConfiguration.model && extracted.defaultModel) {
+                template.defaultConfiguration.model = extracted.defaultModel;
+              }
+              if (
+                !template.defaultConfiguration.thinkingLevel &&
+                extracted.defaultThinkingLevel
+              ) {
+                template.defaultConfiguration.thinkingLevel =
+                  extracted.defaultThinkingLevel;
+              }
+              if (!template.defaultConfiguration.mode && extracted.defaultMode) {
+                template.defaultConfiguration.mode = extracted.defaultMode;
+              }
+            }
+          }
+          if (instance) {
+            if (!instance.model && extracted.defaultModel) {
+              instance.model = extracted.defaultModel;
+            }
+            if (!instance.thinkingLevel && extracted.defaultThinkingLevel) {
+              instance.thinkingLevel = extracted.defaultThinkingLevel;
+            }
+            if (!instance.mode && extracted.defaultMode) {
+              instance.mode = extracted.defaultMode;
+            }
+          }
+          if (configId) {
+            for (const sibling of root.agents) {
+              if (sibling.configId !== configId) continue;
+              reconcileInstanceSelections(sibling, extracted);
+            }
+          }
+        })
+        .pipe(Effect.catchAll(() => Effect.void));
+
+      // Restore user-preferred selections to ACP if still valid. Calls the
+      // low-level AcpClient directly (not `setSessionConfigOption`) because
+      // we're inside `_initSession` and the high-level method waits on
+      // `initDeferred`, which wouldn't resolve until this function returns —
+      // deadlock.
+      const pushAcp = (configId: string, value: string) =>
+        agent.client
+          .setSessionConfigOption({ sessionId, configId, value })
+          .pipe(Effect.catchAll(() => Effect.succeed({ configOptions: [] })));
+
+      if (
+        preModel &&
+        preModel !== extracted.defaultModel &&
+        (!extracted.availableModels.length ||
+          extracted.availableModels.some((m) => m.value === preModel))
+      ) {
+        yield* pushAcp("model", preModel);
+      }
+      if (
+        preThinking &&
+        preThinking !== extracted.defaultThinkingLevel &&
+        (!extracted.availableThinkingLevels.length ||
+          extracted.availableThinkingLevels.some(
+            (t) => t.value === preThinking,
+          ))
+      ) {
+        yield* pushAcp("reasoning_effort", preThinking);
+      }
+      if (
+        preMode &&
+        preMode !== extracted.defaultMode &&
+        (!extracted.availableModes.length ||
+          extracted.availableModes.some((m) => m.value === preMode))
+      ) {
+        yield* pushAcp("mode", preMode);
+      }
+    });
+  };
+
+  /**
+   * React to mid-session ACP config changes (e.g. the user switched models
+   * in the ACP-side UI). Overwrites both the template's available options
+   * and this agent instance's current selection, and snaps sibling agents
+   * to the new defaults if their current selections fell out of range.
+   */
+  private _reconcileConfigChange = (options: any[]) => {
+    const agent = this;
+    return Effect.gen(function* () {
+      if (!agent.db) return;
+      const extracted = extractAcpConfig(options);
+
+      yield* agent.db
+        .update((root) => {
+          const instance = root.agents.find((a) => a.id === agent.id);
+          if (!instance) return;
+
+          const configId = instance.configId;
+          if (configId) {
+            const template = root.agentConfigs.find((c) => c.id === configId);
+            if (template) {
+              template.availableModels = extracted.availableModels;
+              template.availableThinkingLevels =
+                extracted.availableThinkingLevels;
+              template.availableModes = extracted.availableModes;
+            }
+          }
+
+          if (extracted.defaultModel) instance.model = extracted.defaultModel;
+          if (extracted.defaultThinkingLevel)
+            instance.thinkingLevel = extracted.defaultThinkingLevel;
+          if (extracted.defaultMode) instance.mode = extracted.defaultMode;
+
+          if (configId) {
+            for (const sibling of root.agents) {
+              if (sibling.id === agent.id || sibling.configId !== configId)
+                continue;
+              reconcileInstanceSelections(sibling, extracted);
+            }
+          }
+        })
+        .pipe(Effect.catchAll(() => Effect.void));
     });
   };
 
   private _buildClientConfig(base: AcpClientConfig): AcpClientConfig {
     const tm = this._terminalManager;
+    const agent = this;
     return {
       ...base,
       handlers: {
+        // Default permission handler routes through the event log (so the
+        // UI can render the prompt and the user's response flows back via
+        // a synthetic event). Only applied when the caller didn't supply
+        // one AND we have a DB — without a DB there's no event log to
+        // write to, so AcpClient's fallback (auto-allow) takes over.
+        ...(base.handlers?.requestPermission || !agent.db
+          ? {}
+          : {
+              requestPermission: (params: acp.RequestPermissionRequest) =>
+                agent._handleRequestPermission(params),
+            }),
         ...base.handlers,
         createTerminal: (params) => Promise.resolve(tm.create(params)),
         terminalOutput: (params) =>
@@ -192,6 +576,57 @@ export class Agent {
         killTerminal: (params) => Promise.resolve(tm.kill(params.terminalId)),
       },
     };
+  }
+
+  /**
+   * Default permission handler. Writes a `permission_request` event into
+   * the agent's eventLog and returns a promise that resolves when a
+   * matching `permission_response` lands (via our eventLog subscription).
+   *
+   * The UI reads the request out of the event log via the standard
+   * materializer and, when the user clicks a choice, writes the response
+   * as another event — no direct RPC to the agent process needed.
+   */
+  private _handleRequestPermission(
+    params: acp.RequestPermissionRequest,
+  ): Promise<acp.RequestPermissionResponse> {
+    const requestId = nanoid();
+    const promise = new Promise<acp.RequestPermissionResponse>((resolve) => {
+      this._pendingPermissions.set(requestId, (outcome) => {
+        resolve({ outcome } as acp.RequestPermissionResponse);
+      });
+    });
+    this._logSyntheticEvent({
+      kind: "permission_request",
+      requestId,
+      toolCall: params.toolCall,
+      options: params.options,
+    });
+    return promise;
+  }
+
+  /**
+   * Subscribe to the agent's own eventLog so we can react to
+   * `permission_response` events. Fires once per agent instance after the
+   * row exists in the DB. No-op in ephemeral mode (no db, no eventLog
+   * collection, no permission flow — AcpClient's auto-allow default wins).
+   */
+  private _subscribeEventLog() {
+    if (!this.db) return;
+    this._unsubEventLog?.();
+    const node = this.db.agents.find((a) => a.id === this.id);
+    if (!node) return;
+    this._unsubEventLog = node.eventLog.subscribeData(({ newItems }) => {
+      for (const item of newItems as AgentEvent[]) {
+        if (item.data?.kind !== "permission_response") continue;
+        const { requestId, outcome } = item.data;
+        const resolver = this._pendingPermissions.get(requestId);
+        if (resolver) {
+          this._pendingPermissions.delete(requestId);
+          resolver(outcome);
+        }
+      }
+    });
   }
 
   private _initSession = (opts?: { freshSession?: boolean }) => {
@@ -206,7 +641,8 @@ export class Agent {
         },
       });
       agent.supportsLoadSession = !!initResult.agentCapabilities?.loadSession;
-      agent._logSyntheticEvent("initialize", {
+      agent._logSyntheticEvent({
+        kind: "initialize",
         agentCapabilities: initResult.agentCapabilities,
       });
 
@@ -214,7 +650,7 @@ export class Agent {
 
       const existingSessionId = opts?.freshSession
         ? null
-        : yield* agent.store.getSessionId(agent.id);
+        : agent._getSessionId();
 
       let sessionId: string;
       if (existingSessionId) {
@@ -225,14 +661,18 @@ export class Agent {
             mcpServers: agent.mcpServers,
           });
           sessionId = session.sessionId;
-          yield* agent.store.setSessionId(agent.id, sessionId);
-          agent._logSyntheticEvent("new_session", {
+          yield* agent._setSessionId(sessionId);
+          agent._logSyntheticEvent({
+            kind: "new_session",
             sessionId,
             configOptions: session.configOptions,
-            modes: (session as any).modes,
+            modes: session.modes,
           });
-          if (session.configOptions && agent.onConfigOptions) {
-            agent.onConfigOptions(session.configOptions);
+          if (session.configOptions) {
+            yield* agent._reconcileConfigOptions(
+              session.configOptions,
+              sessionId,
+            );
           }
         } else {
           const resumeResult = yield* Effect.either(
@@ -244,7 +684,7 @@ export class Agent {
           );
           if (resumeResult._tag === "Right") {
             sessionId = existingSessionId;
-            agent._logSyntheticEvent("resume_session", { sessionId });
+            agent._logSyntheticEvent({ kind: "resume_session", sessionId });
           } else {
             yield* agent._generateHandoff();
             const session = yield* agent.client.newSession({
@@ -252,14 +692,18 @@ export class Agent {
               mcpServers: agent.mcpServers,
             });
             sessionId = session.sessionId;
-            yield* agent.store.setSessionId(agent.id, sessionId);
-            agent._logSyntheticEvent("new_session", {
+            yield* agent._setSessionId(sessionId);
+            agent._logSyntheticEvent({
+              kind: "new_session",
               sessionId,
               configOptions: session.configOptions,
-              modes: (session as any).modes,
+              modes: session.modes,
             });
-            if (session.configOptions && agent.onConfigOptions) {
-              agent.onConfigOptions(session.configOptions);
+            if (session.configOptions) {
+              yield* agent._reconcileConfigOptions(
+                session.configOptions,
+                sessionId,
+              );
             }
           }
         }
@@ -269,14 +713,18 @@ export class Agent {
           mcpServers: agent.mcpServers,
         });
         sessionId = session.sessionId;
-        yield* agent.store.setSessionId(agent.id, sessionId);
-        agent._logSyntheticEvent("new_session", {
+        yield* agent._setSessionId(sessionId);
+        agent._logSyntheticEvent({
+          kind: "new_session",
           sessionId,
           configOptions: session.configOptions,
-          modes: (session as any).modes,
+          modes: session.modes,
         });
-        if (session.configOptions && agent.onConfigOptions) {
-          agent.onConfigOptions(session.configOptions);
+        if (session.configOptions) {
+          yield* agent._reconcileConfigOptions(
+            session.configOptions,
+            sessionId,
+          );
         }
       }
 
@@ -286,7 +734,7 @@ export class Agent {
         queueRef: agent.queueRef,
         client: agent.client,
         initialContextRef: agent.initialContextRef,
-        onStateChange: agent.onStateChange,
+        setState: agent._setState,
         preamble: agent._computePreamble(),
       });
     }).pipe(
@@ -336,6 +784,7 @@ export class Agent {
       }
       agent.client = clientResult.right;
       agent._subscribeSessionUpdates();
+      agent._subscribeEventLog();
 
       yield* Effect.forkDaemon(agent._initSession(opts));
     });
@@ -356,20 +805,25 @@ export class Agent {
         );
       }
 
+      // The zenbu MCP proxy exposes our in-process tool registry to the ACP
+      // agent via stdio. It's only wired if BOTH conditions hold:
+      //   1. Some caller registered tools (hasToolListeners) — otherwise
+      //      there's nothing to expose.
+      //   2. The host explicitly provided `mcpProxyCommand` pointing at a
+      //      node-compatible runtime. Without this we can't safely spawn the
+      //      proxy script; users may not have node on PATH. Silent fallback
+      //      to "node" would cause ENOENT mid-handshake.
       let mcpServers: acp.McpServer[];
-      if (hasToolListeners) {
+      if (hasToolListeners && config.mcpProxyCommand) {
         const proxyScriptPath = writeProxyScript(socketPath);
         const proxyMcpServer = {
           type: "stdio" as const,
-          name: "zenbu-tools",
-          command: "node",
+          name: "zenbu",
+          command: config.mcpProxyCommand,
           args: [proxyScriptPath],
           env: [],
         };
-        mcpServers = [
-          proxyMcpServer,
-          ...(config.mcpServers ?? []),
-        ] as acp.McpServer[];
+        mcpServers = [proxyMcpServer, ...(config.mcpServers ?? [])];
       } else {
         mcpServers = config.mcpServers ?? [];
       }
@@ -395,23 +849,21 @@ export class Agent {
         initDeferred,
         null as any,
         baseClientConfig,
-        config.eventLog,
-        config.store,
+        config.db,
         config.cwd,
         mcpServers,
         terminalManager,
         initialContextRef,
-        config.onConfigOptions,
-        config.onConfigChange,
         config.onStateChange,
+        config.onSessionUpdate,
         config.firstPromptPreamble,
-        config.firstPromptLatch,
       );
 
       const builtConfig = agent._buildClientConfig(baseClientConfig);
       const client = yield* AcpClient.create(builtConfig);
       agent.client = client;
       agent._subscribeSessionUpdates();
+      agent._subscribeEventLog();
 
       yield* Effect.forkDaemon(agent._initSession());
 
@@ -439,41 +891,25 @@ export class Agent {
 
   /**
    * Resolve the first-prompt preamble for the next send. Checks the latch
-   * (durable if provided, in-memory otherwise), invokes the provider once,
-   * and marks the latch even on failure/empty-result to avoid retrying on
-   * every send.
+   * (durable when `db` is present, in-memory otherwise), invokes the
+   * provider once, and marks the latch even on failure/empty-result to
+   * avoid retrying on every send.
    */
   private _computePreamble = () => {
     const agent = this;
     return Effect.gen(function* () {
       if (!agent.firstPromptPreamble) return [] as acp.ContentBlock[];
 
-      let alreadyFired: boolean;
-      if (agent.firstPromptLatch) {
-        alreadyFired = yield* agent.firstPromptLatch
-          .hasFired()
-          .pipe(Effect.catchAll(() => Effect.succeed(false)));
-      } else {
-        alreadyFired = agent._inMemoryFirstFired;
-      }
-      if (alreadyFired) return [] as acp.ContentBlock[];
+      if (agent._firstPromptHasFired()) return [] as acp.ContentBlock[];
 
-      const blocks = yield* agent
-        .firstPromptPreamble()
-        .pipe(
-          Effect.catchAll((err) => {
-            console.warn("[agent] firstPromptPreamble failed:", err);
-            return Effect.succeed([] as acp.ContentBlock[]);
-          }),
-        );
+      const blocks = yield* agent.firstPromptPreamble().pipe(
+        Effect.catchAll((err) => {
+          console.warn("[agent] firstPromptPreamble failed:", err);
+          return Effect.succeed([] as acp.ContentBlock[]);
+        }),
+      );
 
-      if (agent.firstPromptLatch) {
-        yield* agent.firstPromptLatch
-          .markFired()
-          .pipe(Effect.catchAll(() => Effect.void));
-      } else {
-        agent._inMemoryFirstFired = true;
-      }
+      yield* agent._firstPromptMarkFired();
       return blocks;
     });
   };
@@ -487,7 +923,7 @@ export class Agent {
 
       const userText = content
         .filter((b) => b.type === "text")
-        .map((b) => (b as any).text as string)
+        .map((b) => b.text)
         .join("\n");
       if (userText) {
         agent.eventBuffer.push({
@@ -533,7 +969,7 @@ export class Agent {
             initialContextRef,
             sessionId: newState.sessionId,
             content: agent._applyHandoff(content),
-            onStateChange: agent.onStateChange,
+            setState: agent._setState,
             preamble: agent._computePreamble(),
           });
         }
@@ -554,7 +990,7 @@ export class Agent {
         initialContextRef,
         sessionId: state.sessionId,
         content: agent._applyHandoff(content),
-        onStateChange: agent.onStateChange,
+        setState: agent._setState,
         preamble: agent._computePreamble(),
       });
       yield* flushQueue({
@@ -562,7 +998,7 @@ export class Agent {
         queueRef,
         client,
         initialContextRef,
-        onStateChange: agent.onStateChange,
+        setState: agent._setState,
         preamble: agent._computePreamble(),
       });
     });
@@ -604,14 +1040,18 @@ export class Agent {
     const agent = this;
     return Effect.gen(function* () {
       yield* agent._generateHandoff();
-      yield* agent.store.deleteSessionId(agent.id);
+      yield* agent._setSessionId(null);
       agent.clientConfig = { ...agent.clientConfig, command, args };
       yield* agent._restart({ freshSession: true });
     });
   };
 
-  setSessionConfigOption = (configId: string, value: string) => {
-    const { stateRef, initDeferred, client, onConfigOptions } = this;
+  setSessionConfigOption = (
+    configId: string,
+    value: string,
+  ): Effect.Effect<void, unknown> => {
+    const agent = this;
+    const { stateRef, initDeferred, client } = this;
     return Effect.gen(function* () {
       yield* Deferred.await(initDeferred);
       const state = yield* Ref.get(stateRef);
@@ -626,12 +1066,47 @@ export class Agent {
         configId,
         value,
       });
-      if (
-        onConfigOptions &&
-        result.configOptions &&
-        result.configOptions.length > 0
-      ) {
-        onConfigOptions(result.configOptions);
+
+      // Mirror the user's selection onto TWO places:
+      //   1. `agents[i].{model|thinkingLevel|mode}` — live instance state
+      //   2. `agentConfigs[a.configId].defaultConfiguration.{...}` — the
+      //      saved default for this agent kind, so a freshly-spawned agent
+      //      of the same kind starts with this selection instead of nothing.
+      //
+      // ACP configId -> record field mapping:
+      //   "model" -> model
+      //   "reasoning_effort" -> thinkingLevel
+      //   "mode" -> mode
+      if (agent.db) {
+        yield* agent.db
+          .update((root) => {
+            const a = root.agents.find((x) => x.id === agent.id);
+            if (!a) return;
+            if (configId === "model") a.model = value;
+            else if (configId === "reasoning_effort") a.thinkingLevel = value;
+            else if (configId === "mode") a.mode = value;
+
+            const template = root.agentConfigs.find((c) => c.id === a.configId);
+            if (template) {
+              if (!template.defaultConfiguration) {
+                template.defaultConfiguration = {};
+              }
+              if (configId === "model") {
+                template.defaultConfiguration.model = value;
+              } else if (configId === "reasoning_effort") {
+                template.defaultConfiguration.thinkingLevel = value;
+              } else if (configId === "mode") {
+                template.defaultConfiguration.mode = value;
+              }
+            }
+          })
+          .pipe(Effect.catchAll(() => Effect.void));
+      }
+
+      // ACP may return refreshed configOptions in the response — reconcile
+      // them the same way we do for the initial newSession.configOptions.
+      if (result.configOptions && result.configOptions.length > 0) {
+        yield* agent._reconcileConfigOptions(result.configOptions, sessionId);
       }
     });
   };
@@ -651,6 +1126,17 @@ export class Agent {
     const { initDeferred, client, id, socketPath, _terminalManager } = this;
     return Effect.gen(function* () {
       _terminalManager.releaseAll();
+      agent._unsubSessionUpdate?.();
+      agent._unsubSessionUpdate = null;
+      agent._unsubEventLog?.();
+      agent._unsubEventLog = null;
+      // Any permission requests still waiting for a response will never
+      // resolve; reject them so upstream awaiters unwind instead of
+      // hanging. (Hanging would leak memory + fiber resources.)
+      for (const [, resolve] of agent._pendingPermissions) {
+        resolve({ outcome: "cancelled" });
+      }
+      agent._pendingPermissions.clear();
       yield* client.close();
       yield* agent._setState({ kind: "closed" });
       yield* Deferred.succeed(initDeferred, void 0);
@@ -666,28 +1152,27 @@ export class Agent {
   };
 }
 
+type SetState = (state: AgentState) => Effect.Effect<void, never>;
+
 const sendPrompt = (ctx: {
   stateRef: Ref.Ref<AgentState>;
   client: AcpClient;
   initialContextRef: Ref.Ref<acp.ContentBlock[] | null>;
   sessionId: string;
   content: acp.ContentBlock[];
-  onStateChange?: (state: AgentState) => void;
+  setState: SetState;
   preamble?: Effect.Effect<acp.ContentBlock[], unknown>;
 }) =>
   Effect.gen(function* () {
     const {
-      stateRef,
       client,
       initialContextRef,
       sessionId,
       content,
-      onStateChange,
+      setState,
       preamble,
     } = ctx;
-    const prompting: AgentState = { kind: "prompting", sessionId };
-    yield* Ref.set(stateRef, prompting);
-    onStateChange?.(prompting);
+    yield* setState({ kind: "prompting", sessionId });
 
     const initialContext = yield* Ref.get(initialContextRef);
     let prompt = content;
@@ -706,9 +1191,7 @@ const sendPrompt = (ctx: {
 
     yield* client.prompt({ sessionId, prompt });
 
-    const ready: AgentState = { kind: "ready", sessionId };
-    yield* Ref.set(stateRef, ready);
-    onStateChange?.(ready);
+    yield* setState({ kind: "ready", sessionId });
   });
 
 const flushQueue = (ctx: {
@@ -716,7 +1199,7 @@ const flushQueue = (ctx: {
   queueRef: Ref.Ref<acp.ContentBlock[]>;
   client: AcpClient;
   initialContextRef: Ref.Ref<acp.ContentBlock[] | null>;
-  onStateChange?: (state: AgentState) => void;
+  setState: SetState;
   preamble?: Effect.Effect<acp.ContentBlock[], unknown>;
 }) =>
   Effect.gen(function* () {
@@ -725,7 +1208,7 @@ const flushQueue = (ctx: {
       queueRef,
       client,
       initialContextRef,
-      onStateChange,
+      setState,
       preamble,
     } = ctx;
     const queued = yield* Ref.get(queueRef);
@@ -742,7 +1225,7 @@ const flushQueue = (ctx: {
       initialContextRef,
       sessionId: state.sessionId,
       content: queued,
-      onStateChange,
+      setState,
       preamble,
     });
   });

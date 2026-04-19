@@ -4,8 +4,6 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Agent } from "../src/agent.ts";
-import type { EventLog } from "../src/event-log.ts";
-import type { AgentStore } from "../src/store.ts";
 import type { SessionUpdate } from "@agentclientprotocol/sdk";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -28,30 +26,13 @@ try {
   codexAvailable = false;
 }
 
-function createTestEventLog() {
+/**
+ * Ephemeral agent harness: no DB handle, session + first-prompt state live
+ * in-memory. `events` is a passive observer accumulating raw ACP updates
+ * via the onSessionUpdate hook so assertions can inspect the stream.
+ */
+function createEphemeralAgent(id?: string) {
   const events: SessionUpdate[] = [];
-  const log: EventLog = {
-    append: (newEvents) =>
-      Effect.gen(function* () {
-        events.push(...newEvents);
-      }),
-  };
-  return { log, events };
-}
-
-function createTestStore(): AgentStore {
-  const sessions = new Map<string, string>();
-  return {
-    getSessionId: (agentId) =>
-      Effect.succeed(sessions.get(agentId) ?? null),
-    setSessionId: (agentId, sessionId) =>
-      Effect.sync(() => { sessions.set(agentId, sessionId); }),
-    deleteSessionId: (agentId) =>
-      Effect.sync(() => { sessions.delete(agentId); }),
-  };
-}
-
-function createAgent(eventLog: EventLog, store: AgentStore, id?: string) {
   return Effect.runPromise(
     Agent.create({
       id,
@@ -66,13 +47,14 @@ function createAgent(eventLog: EventLog, store: AgentStore, id?: string) {
         },
       },
       cwd: process.cwd(),
-      eventLog,
-      store,
+      onSessionUpdate: (u) => {
+        events.push(u);
+      },
     }),
-  );
+  ).then((agent) => ({ agent, events }));
 }
 
-describe.skipIf(!codexAvailable)("Agent", () => {
+describe.skipIf(!codexAvailable)("Agent (ephemeral mode)", () => {
   let agent: Agent;
 
   afterEach(async () => {
@@ -82,9 +64,7 @@ describe.skipIf(!codexAvailable)("Agent", () => {
   });
 
   it("generates an id when none is provided", async () => {
-    const { log } = createTestEventLog();
-    const store = createTestStore();
-    agent = await createAgent(log, store);
+    ({ agent } = await createEphemeralAgent());
 
     const id = agent.getId();
     expect(id).toBeTruthy();
@@ -93,26 +73,20 @@ describe.skipIf(!codexAvailable)("Agent", () => {
   });
 
   it("uses provided id", async () => {
-    const { log } = createTestEventLog();
-    const store = createTestStore();
-    agent = await createAgent(log, store, "my-agent-123");
+    ({ agent } = await createEphemeralAgent("my-agent-123"));
 
     expect(agent.getId()).toBe("my-agent-123");
   });
 
   it("starts in initializing state", async () => {
-    const { log } = createTestEventLog();
-    const store = createTestStore();
-    agent = await createAgent(log, store);
+    ({ agent } = await createEphemeralAgent());
 
     const state = await Effect.runPromise(agent.getState());
     expect(state.kind).toBe("initializing");
   });
 
   it("transitions to ready after first send", async () => {
-    const { log } = createTestEventLog();
-    const store = createTestStore();
-    agent = await createAgent(log, store);
+    ({ agent } = await createEphemeralAgent());
 
     await Effect.runPromise(
       agent.send([{ type: "text", text: "hello" }]),
@@ -122,40 +96,39 @@ describe.skipIf(!codexAvailable)("Agent", () => {
     expect(state.kind).toBe("ready");
   });
 
-  it("stores session id mapping after init", async () => {
-    const { log } = createTestEventLog();
-    const store = createTestStore();
-    agent = await createAgent(log, store, "test-agent");
+  it("acquires a session id after init (visible on state)", async () => {
+    ({ agent } = await createEphemeralAgent("test-agent"));
 
     await Effect.runPromise(
       agent.send([{ type: "text", text: "hello" }]),
     );
 
-    const sessionId = await Effect.runPromise(store.getSessionId("test-agent"));
-    expect(sessionId).toBeTruthy();
+    const state = await Effect.runPromise(agent.getState());
+    expect(state.kind).toBe("ready");
+    if (state.kind === "ready") {
+      expect(state.sessionId).toBeTruthy();
+    }
   });
 
-  it("sends a message and collects events in event log", async () => {
-    const { log, events } = createTestEventLog();
-    const store = createTestStore();
-    agent = await createAgent(log, store);
+  it("sends a message and streams session updates", async () => {
+    let result: { agent: Agent; events: SessionUpdate[] };
+    result = await createEphemeralAgent();
+    agent = result.agent;
 
     await Effect.runPromise(
       agent.send([{ type: "text", text: "Say hello" }]),
     );
 
-    expect(events.length).toBeGreaterThan(0);
+    expect(result.events.length).toBeGreaterThan(0);
 
-    const messageChunks = events.filter(
+    const messageChunks = result.events.filter(
       (e) => e.sessionUpdate === "agent_message_chunk",
     );
     expect(messageChunks.length).toBeGreaterThan(0);
   });
 
   it("closes and transitions to closed state", async () => {
-    const { log } = createTestEventLog();
-    const store = createTestStore();
-    agent = await createAgent(log, store);
+    ({ agent } = await createEphemeralAgent());
 
     await Effect.runPromise(agent.close());
 
@@ -164,9 +137,7 @@ describe.skipIf(!codexAvailable)("Agent", () => {
   });
 
   it("fails to send when closed", async () => {
-    const { log } = createTestEventLog();
-    const store = createTestStore();
-    agent = await createAgent(log, store);
+    ({ agent } = await createEphemeralAgent());
 
     await Effect.runPromise(agent.close());
 

@@ -1,23 +1,21 @@
 import zod from "zod";
-import type { SessionUpdate } from "@agentclientprotocol/sdk";
-import { createSchema, f, makeCollection, type InferSchema, type InferRoot } from "@zenbu/kyju/schema";
-
-const agentEventSchema = {
-  timestamp: zod.number(),
-  data: zod.union([
-    zod.object({ kind: zod.literal("user_prompt"), text: zod.string() }),
-    zod.object({ kind: zod.literal("session_update"), update: zod.any() }),
-    zod.object({ kind: zod.literal("interrupted") }),
-  ]),
-};
-
-export type AgentEvent = {
-  timestamp: number;
-  data:
-    | { kind: "user_prompt"; text: string }
-    | { kind: "session_update"; update: SessionUpdate }
-    | { kind: "interrupted" };
-};
+import {
+  createSchema,
+  f,
+  makeCollection,
+  type InferSchema,
+  type InferRoot,
+} from "@zenbu/kyju/schema";
+import {
+  agentSchemaFragment,
+  agentConfigSchema,
+} from "@zenbu/agent/src/schema";
+export type {
+  AgentEvent,
+  AgentTitle,
+  AgentRecord,
+  ArchivedAgentRecord,
+} from "@zenbu/agent/src/schema";
 
 const paneSchema = zod.object({
   id: zod.string(),
@@ -46,97 +44,33 @@ const windowStateSchema = zod.object({
   sidebarPanel: zod.string().default("overview"),
 });
 
-const agentRecordBase = {
-  id: zod.string(),
-  name: zod.string(),
-  startCommand: zod.string(),
-  configId: zod.string(),
-  status: zod.enum(["idle", "streaming"]).default("idle"),
-  metadata: zod.record(zod.string(), zod.unknown()).optional(),
-  eventLog: f.collection(zod.object(agentEventSchema)),
-  model: zod.string().optional(),
-  thinkingLevel: zod.string().optional(),
-  mode: zod.string().optional(),
-  processState: zod.string().optional(),
-  reloadMode: zod.enum(["continue", "keep-alive"]).default("keep-alive"),
-  title: zod
-    .discriminatedUnion("kind", [
-      zod.object({ kind: zod.literal("not-available") }),
-      zod.object({ kind: zod.literal("generating") }),
-      zod.object({ kind: zod.literal("set"), value: zod.string() }),
-    ])
-    .default({ kind: "not-available" }),
-  lastUserMessageAt: zod.number().optional(),
-  lastFinishedAt: zod.number().optional(),
-  firstPromptSentAt: zod.number().nullable().default(null),
-  sessionId: zod.string().nullable().default(null),
-  createdAt: zod.number(),
-};
-
 export const appSchema = createSchema({
-  agentConfigs: f
-    .array(
-      zod.object({
-        id: zod.string(),
-        name: zod.string(),
-        startCommand: zod.string(),
-        availableModels: zod
-          .array(
-            zod.object({
-              value: zod.string(),
-              name: zod.string(),
-              description: zod.string().optional(),
-            }),
-          )
-          .default([]),
-        availableThinkingLevels: zod
-          .array(
-            zod.object({
-              value: zod.string(),
-              name: zod.string(),
-              description: zod.string().optional(),
-            }),
-          )
-          .default([]),
-        availableModes: zod
-          .array(
-            zod.object({
-              value: zod.string(),
-              name: zod.string(),
-              description: zod.string().optional(),
-            }),
-          )
-          .default([]),
-        iconBlobId: zod.string().optional(),
-      }),
-    )
-    .default([
-      {
-        id: "codex",
-        name: "codex",
-        startCommand:
-          "$ZENBU_BUN $HOME/.zenbu/plugins/zenbu/packages/codex-acp/src/index.ts",
-        availableModels: [],
-        availableThinkingLevels: [],
-        availableModes: [],
-      },
-      {
-        id: "claude",
-        name: "claude",
-        startCommand:
-          "$ZENBU_BUN $HOME/.zenbu/plugins/zenbu/packages/claude-acp/src/index.ts",
-        availableModels: [],
-        availableThinkingLevels: [],
-        availableModes: [],
-      },
-    ]),
-  agents: f.array(zod.object(agentRecordBase)).default([]),
-  archivedAgents: f.collection(
-    zod.object({ ...agentRecordBase, archivedAt: zod.number() }),
-    { debugName: "archivedAgents" },
-  ),
-  hotAgentsCap: f.number().default(100),
-  skillRoots: f.array(zod.string()).default([]),
+  // Agent package owns shapes (`agentConfigs`, `agents`, `archivedAgents`,
+  // `hotAgentsCap`, `skillRoots`). Init provides host-specific defaults for
+  // `agentConfigs` by overriding the field definition after the spread.
+  ...agentSchemaFragment,
+  agentConfigs: f.array(agentConfigSchema).default([
+    {
+      id: "codex",
+      name: "codex",
+      startCommand:
+        "$ZENBU_BUN $HOME/.zenbu/plugins/zenbu/packages/codex-acp/src/index.ts",
+      availableModels: [],
+      availableThinkingLevels: [],
+      availableModes: [],
+      defaultConfiguration: {},
+    },
+    {
+      id: "claude",
+      name: "claude",
+      startCommand:
+        "$ZENBU_BUN $HOME/.zenbu/plugins/zenbu/packages/claude-acp/src/index.ts",
+      availableModels: [],
+      availableThinkingLevels: [],
+      availableModes: [],
+      defaultConfiguration: {},
+    },
+  ]),
   selectedConfigId: f.string().default("claude"),
   summarizationAgentConfigId: f.string().nullable().default(null),
   summarizationModel: f.string().nullable().default(null),
@@ -153,7 +87,7 @@ export const appSchema = createSchema({
   tabSidebarOpen: f.boolean().default(true),
   sidebarPanel: f.string().default("overview"),
   viewRegistry: f
-  //
+    //
     .array(
       zod.object({
         scope: zod.string(),
@@ -250,15 +184,10 @@ export const appSchema = createSchema({
   // when target/windowId are unchanged.
   focusRequestTarget: f.string().nullable().default(null),
   focusRequestWindowId: f.string().nullable().default(null),
-  focusRequestNonce: f.string().default(""),
+  focusRequestNonce: f.string().default(""), // empty string fixme
 });
 
 export const schema = appSchema;
 
 export type AppSchema = InferSchema<typeof appSchema>;
 export type SchemaRoot = InferRoot<AppSchema>;
-
-export type AgentTitle =
-  | { kind: "not-available" }
-  | { kind: "generating" }
-  | { kind: "set"; value: string };

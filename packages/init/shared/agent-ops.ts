@@ -21,6 +21,46 @@ export type ArchivedAgent = HotAgent & { archivedAt: number };
  *   });
  *   if (evicted.length) await concatArchived(client, evicted);
  */
+type AgentConfig = Kernel["agentConfigs"][number];
+
+/**
+ * Snap a saved selection back to the available list for this kind. Returns
+ * only the fields whose saved value is currently valid; unset (or
+ * out-of-range) fields are omitted so the caller's spread doesn't
+ * resurrect stale values. Used to seed a fresh agent instance from the
+ * template's `defaultConfiguration`.
+ */
+export function validSelectionFromTemplate(
+  template: AgentConfig,
+): { model?: string; thinkingLevel?: string; mode?: string } {
+  const dflt = template.defaultConfiguration ?? {};
+  const out: { model?: string; thinkingLevel?: string; mode?: string } = {};
+  if (
+    dflt.model &&
+    (!template.availableModels?.length ||
+      template.availableModels.some((m) => m.value === dflt.model))
+  ) {
+    out.model = dflt.model;
+  }
+  if (
+    dflt.thinkingLevel &&
+    (!template.availableThinkingLevels?.length ||
+      template.availableThinkingLevels.some(
+        (t) => t.value === dflt.thinkingLevel,
+      ))
+  ) {
+    out.thinkingLevel = dflt.thinkingLevel;
+  }
+  if (
+    dflt.mode &&
+    (!template.availableModes?.length ||
+      template.availableModes.some((m) => m.value === dflt.mode))
+  ) {
+    out.mode = dflt.mode;
+  }
+  return out;
+}
+
 export function insertHotAgent(
   kernel: Kernel,
   agent: HotAgent,

@@ -135,6 +135,11 @@
       "idx": 26,
       "tag": "agents_hot_archive",
       "when": 1776500158129
+    },
+    {
+      "idx": 27,
+      "tag": "agent_default_configuration",
+      "when": 1776556041688
     }
   ]
 }

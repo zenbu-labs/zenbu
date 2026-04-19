@@ -5,7 +5,11 @@ import { nanoid } from "nanoid";
 import { makeCollection } from "@zenbu/kyju/schema";
 import { Service, runtime } from "../runtime";
 import { DbService } from "./db";
-import { insertHotAgent, type ArchivedAgent } from "../../../shared/agent-ops";
+import {
+  insertHotAgent,
+  validSelectionFromTemplate,
+  type ArchivedAgent,
+} from "../../../shared/agent-ops";
 
 const DEFAULT_CWD = path.join(os.homedir(), ".zenbu");
 
@@ -133,6 +137,9 @@ export class CliIntentService extends Service {
 
           if (agent) kernel.selectedConfigId = matched.id;
 
+          const template = kernel.agentConfigs.find((c) => c.id === matched.id);
+          const seeded = template ? validSelectionFromTemplate(template) : {};
+
           const agentId = nanoid();
           const sessionId = nanoid();
           evicted = insertHotAgent(kernel, {
@@ -146,6 +153,7 @@ export class CliIntentService extends Service {
               collectionId: nanoid(),
               debugName: "eventLog",
             }),
+            ...seeded,
             title: { kind: "not-available" },
             reloadMode: "keep-alive",
             sessionId: null,

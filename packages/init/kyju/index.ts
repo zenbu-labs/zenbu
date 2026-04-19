@@ -25,5 +25,6 @@ import m23 from "./0023_add_shortcuts"
 import m24 from "./0024_add_skills_fields"
 import m25 from "./0025_add_focus_request"
 import m26 from "./0026_agents_hot_archive"
+import m27 from "./0027_agent_default_configuration"
 
-export const migrations = [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26]
+export const migrations = [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27]

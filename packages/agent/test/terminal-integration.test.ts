@@ -2,33 +2,9 @@ import { describe, it, expect, afterEach } from "vitest";
 import { Effect } from "effect";
 import { TerminalManager } from "../src/terminal.ts";
 import { Agent, type AgentConfig } from "../src/agent.ts";
-import type { EventLog } from "../src/event-log.ts";
-import type { AgentStore } from "../src/store.ts";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function createTestEventLog(): EventLog {
-  const events: unknown[] = [];
-  return {
-    append: (updates) => {
-      events.push(...updates);
-      return Effect.void;
-    },
-  };
-}
-
-function createTestStore(): AgentStore {
-  const map = new Map<string, string>();
-  return {
-    getSessionId: (agentId) =>
-      Effect.sync(() => map.get(agentId) ?? null),
-    setSessionId: (agentId, sessionId) =>
-      Effect.sync(() => { map.set(agentId, sessionId); }),
-    deleteSessionId: (agentId) =>
-      Effect.sync(() => { map.delete(agentId); }),
-  };
 }
 
 describe("Terminal + AcpClient handler wiring", () => {
@@ -174,8 +150,6 @@ describe("Terminal + AcpClient handler wiring", () => {
           },
         },
         cwd: process.cwd(),
-        eventLog: createTestEventLog(),
-        store: createTestStore(),
       };
 
       agent = await Effect.runPromise(Agent.create(config));
@@ -207,8 +181,6 @@ describe("Terminal + AcpClient handler wiring", () => {
           },
         },
         cwd: process.cwd(),
-        eventLog: createTestEventLog(),
-        store: createTestStore(),
       };
 
       agent = await Effect.runPromise(Agent.create(config));

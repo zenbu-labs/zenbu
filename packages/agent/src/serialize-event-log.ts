@@ -1,10 +1,4 @@
-type AgentEvent = {
-  timestamp: number;
-  data:
-    | { kind: "user_prompt"; text: string }
-    | { kind: "session_update"; update: any }
-    | { kind: "interrupted" };
-};
+import type { AgentEvent } from "./schema.ts";
 
 export type DiffItem = { path: string; oldText?: string; newText: string };
 
@@ -118,6 +112,10 @@ export function materializeToBlocks(events: AgentEvent[]): EventBlock[] {
       blocks.push({ role: "interrupted", blobIds: [] });
       continue;
     }
+
+    // Synthetic events (initialize / new_session / resume_session) are
+    // metadata-only; materialization ignores them.
+    if (event.data.kind !== "session_update") continue;
 
     const update = event.data.update;
     if (!update) continue;

@@ -65,6 +65,7 @@ import {
 } from "./pane-ops";
 import {
   insertHotAgent,
+  validSelectionFromTemplate,
   type ArchivedAgent,
 } from "../../../../shared/agent-ops";
 
@@ -624,28 +625,11 @@ function OrchestratorContent() {
         : undefined;
     const newAgentCwd = inheritedCwd ?? defaultCwd;
 
-    // Copy config from most recent agent with same configId, validating against available options
-    const existingAgents = kernel.agents.filter(
-      (a) => a.configId === selectedConfig.id,
-    );
-    const lastAgent = existingAgents[existingAgents.length - 1];
-
-    const validModel =
-      lastAgent?.model &&
-      (!selectedConfig.availableModels?.length ||
-        selectedConfig.availableModels.some(
-          (m) => m.value === lastAgent.model,
-        ));
-    const validThinking =
-      lastAgent?.thinkingLevel &&
-      (!selectedConfig.availableThinkingLevels?.length ||
-        selectedConfig.availableThinkingLevels.some(
-          (t) => t.value === lastAgent.thinkingLevel,
-        ));
-    const validMode =
-      lastAgent?.mode &&
-      (!selectedConfig.availableModes?.length ||
-        selectedConfig.availableModes.some((m) => m.value === lastAgent.mode));
+    // Seed from the template's defaultConfiguration — the user's most
+    // recent selections for this agent kind. Values that fell out of the
+    // availability lists get dropped; ACP will fill them on the first
+    // session handshake.
+    const seeded = validSelectionFromTemplate(selectedConfig);
 
     let evicted: ArchivedAgent[] = [];
     await client.update((root) => {
@@ -662,9 +646,7 @@ function OrchestratorContent() {
           debugName: "eventLog",
         }),
         status: "idle",
-        ...(validModel ? { model: lastAgent.model } : {}),
-        ...(validThinking ? { thinkingLevel: lastAgent.thinkingLevel } : {}),
-        ...(validMode ? { mode: lastAgent.mode } : {}),
+        ...seeded,
         title: { kind: "not-available" },
         reloadMode: "keep-alive",
         sessionId: null,

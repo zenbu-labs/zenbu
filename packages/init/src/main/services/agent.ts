@@ -4,14 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
 import type * as acp from "@agentclientprotocol/sdk";
-import { Agent, type FirstPromptLatch } from "@zenbu/agent/src/agent";
-import type { EventLog } from "@zenbu/agent/src/event-log";
-import type { AgentStore } from "@zenbu/agent/src/store";
+import { Agent } from "@zenbu/agent/src/agent";
+import type { AgentDb } from "@zenbu/agent/src/schema";
 import type { TerminalInfo } from "@zenbu/agent/src/terminal";
 import { discoverSkills, formatSkillsPrompt } from "@zenbu/agent/src/skills";
 import { Service, runtime } from "../runtime";
 import { DbService } from "./db";
 import { HttpService } from "./http";
+import { validSelectionFromTemplate } from "../../../shared/agent-ops";
 
 const DEFAULT_SKILL_ROOT = path.join(
   os.homedir(),
@@ -44,16 +44,20 @@ function buildAcpEnv(): Record<string, string> {
   return env;
 }
 
-function expandVars(
-  input: string,
-  extraEnv: Record<string, string>,
-): string {
+
+function expandVars(input: string, extraEnv: Record<string, string>): string {
   // Expand $VAR / ${VAR} against process.env + extraEnv, leading ~ against
   // home, and legacy {HOME} for older stored configs.
   const env = { ...process.env, ...extraEnv };
   let out = input.replace(/\{HOME\}/g, os.homedir());
-  out = out.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, name) => env[name] ?? "");
-  out = out.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_, name) => env[name] ?? "");
+  out = out.replace(
+    /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g,
+    (_, name) => env[name] ?? "",
+  );
+  out = out.replace(
+    /\$([A-Za-z_][A-Za-z0-9_]*)/g,
+    (_, name) => env[name] ?? "",
+  );
   // Expand `~` only when it's the start of a token (standalone or followed by /).
   out = out.replace(/(^|\s)~(?=\/|\s|$)/g, (_, pre) => `${pre}${os.homedir()}`);
   return out;
@@ -68,71 +72,6 @@ function parseStartCommand(
   return { command: parts[0] ?? "", args: parts.slice(1) };
 }
 
-function extractOptionEntries(
-  options: any[],
-): { value: string; name: string; description?: string }[] {
-  return options
-    .filter((o: any) => "value" in o)
-    .map((o: any) => ({
-      value: o.value,
-      name: o.name,
-      ...(typeof o.description === "string" && o.description
-        ? { description: o.description }
-        : {}),
-    }));
-}
-
-function extractFromAcpConfig(acpOptions: any[]) {
-  const modelOpt = acpOptions.find(
-    (o: any) => o.category === "model" && o.type === "select",
-  );
-  const thinkingOpt = acpOptions.find(
-    (o: any) => o.category === "thought_level" && o.type === "select",
-  );
-  const modeOpt = acpOptions.find(
-    (o: any) => o.category === "mode" && o.type === "select",
-  );
-  return {
-    availableModels: modelOpt
-      ? extractOptionEntries(modelOpt.options ?? [])
-      : [],
-    availableThinkingLevels: thinkingOpt
-      ? extractOptionEntries(thinkingOpt.options ?? [])
-      : [],
-    availableModes: modeOpt ? extractOptionEntries(modeOpt.options ?? []) : [],
-    defaultModel: modelOpt?.currentValue ?? "",
-    defaultThinkingLevel: thinkingOpt?.currentValue ?? "",
-    defaultMode: modeOpt?.currentValue ?? "",
-  };
-}
-
-function validateAgentSelections(
-  agent: any,
-  extracted: ReturnType<typeof extractFromAcpConfig>,
-) {
-  if (agent.model && extracted.availableModels.length > 0) {
-    if (!extracted.availableModels.some((m: any) => m.value === agent.model)) {
-      agent.model =
-        extracted.defaultModel || extracted.availableModels[0]?.value;
-    }
-  }
-  if (agent.thinkingLevel && extracted.availableThinkingLevels.length > 0) {
-    if (
-      !extracted.availableThinkingLevels.some(
-        (t: any) => t.value === agent.thinkingLevel,
-      )
-    ) {
-      agent.thinkingLevel =
-        extracted.defaultThinkingLevel ||
-        extracted.availableThinkingLevels[0]?.value;
-    }
-  }
-  if (agent.mode && extracted.availableModes.length > 0) {
-    if (!extracted.availableModes.some((m: any) => m.value === agent.mode)) {
-      agent.mode = extracted.defaultMode || extracted.availableModes[0]?.value;
-    }
-  }
-}
 
 const SUMMARIZATION_PROMPT = `You will be given a user's first message in a chat session. Generate a very short title (max 6 words) that captures the intent.
 
@@ -162,7 +101,25 @@ export class AgentService extends Service {
 
   private processes = new Map<string, Agent>();
   private pendingContinues = new Set<string>();
-  private hasSentFirst = new Set<string>();
+
+  /**
+   * Project the kernel-section effect-client into the shape the Agent class
+   * expects. Top-level `readRoot`/`update` are on the root client; section
+   * field nodes (`agents`, `archivedAgents`) are on `client.plugin.kernel`.
+   * The Agent class only cares about the agent fragment's surface.
+   */
+  private agentDb(): AgentDb {
+    const client = this.ctx.db.client;
+    return {
+      readRoot: () => client.readRoot().plugin.kernel,
+      update: (fn) =>
+        client.update((root) => {
+          fn(root.plugin.kernel);
+        }),
+      agents: client.plugin.kernel.agents,
+      archivedAgents: client.plugin.kernel.archivedAgents,
+    };
+  }
 
   private async ensureProcess(agentId: string): Promise<Agent> {
     const existing = this.processes.get(agentId);
@@ -187,83 +144,10 @@ export class AgentService extends Service {
         : undefined;
     const cwd = agentCwd || path.join(os.homedir(), ".zenbu");
 
-    const eventLog: EventLog = {
-      append: (events) => {
-        const agentNode = client.plugin.kernel.agents.find(
-          (a) => a.id === agentId,
-        );
-        if (!agentNode) return Effect.void;
-        return agentNode.eventLog
-          .concat(
-            events.map((update) => ({
-              timestamp: Date.now(),
-              data: { kind: "session_update" as const, update },
-            })),
-          )
-          .pipe(
-            Effect.mapError((e: unknown) => ({
-              code: "EVENT_LOG_WRITE_FAILED" as const,
-              message: String(e),
-            })),
-          );
-      },
-    };
-
-    const store: AgentStore = {
-      getSessionId: (id) =>
-        Effect.sync(() => {
-          const kernel = client.readRoot().plugin.kernel;
-          return kernel.agents.find((a) => a.id === id)?.sessionId ?? null;
-        }),
-      setSessionId: (id, sessionId) =>
-        client
-          .update((root) => {
-            const a = root.plugin.kernel.agents.find((x) => x.id === id);
-            if (a) a.sessionId = sessionId;
-          })
-          .pipe(
-            Effect.mapError((e) => ({
-              code: "AGENT_STORE_ERROR" as const,
-              message: String(e),
-            })),
-          ),
-      deleteSessionId: (id) =>
-        client
-          .update((root) => {
-            const a = root.plugin.kernel.agents.find((x) => x.id === id);
-            if (a) a.sessionId = null;
-          })
-          .pipe(
-            Effect.mapError((e) => ({
-              code: "AGENT_STORE_ERROR" as const,
-              message: String(e),
-            })),
-          ),
-    };
-
-    const firstPromptLatch: FirstPromptLatch = {
-      hasFired: () =>
-        Effect.sync(() => {
-          const kernel = client.readRoot().plugin.kernel;
-          return (
-            kernel.agents.find((a) => a.id === agentId)?.firstPromptSentAt !=
-            null
-          );
-        }),
-      markFired: () =>
-        client
-          .update((root) => {
-            const a = root.plugin.kernel.agents.find((x) => x.id === agentId);
-            if (a) a.firstPromptSentAt = Date.now();
-          })
-          .pipe(Effect.catchAll(() => Effect.void)),
-    };
-
     const firstPromptPreamble = () =>
       Effect.tryPromise({
         try: async () => {
-          const configuredRoots =
-            client.readRoot().plugin.kernel.skillRoots;
+          const configuredRoots = client.readRoot().plugin.kernel.skillRoots;
           const roots =
             configuredRoots.length > 0 ? configuredRoots : [DEFAULT_SKILL_ROOT];
           const { skills } = await discoverSkills(roots);
@@ -282,145 +166,11 @@ export class AgentService extends Service {
           args,
           cwd,
           env: extraEnv,
-          handlers: {
-            requestPermission: async () => ({
-              outcome: { outcome: "selected" as const, optionId: "allow" },
-            }),
-          },
         },
         cwd,
-        eventLog,
-        store,
-        firstPromptLatch,
+        db: this.agentDb(),
+        mcpProxyCommand: readZenbuPaths().bunPath,
         firstPromptPreamble,
-        onStateChange: (state) => {
-          this.setProcessState(agentId, state.kind);
-        },
-        onConfigOptions: (options) => {
-          const extracted = extractFromAcpConfig(options as any[]);
-          // Read pre-existing agent config before updating DB
-          const preExisting = client
-            .readRoot()
-            .plugin.kernel.agents.find((a) => a.id === agentId);
-          const preModel = preExisting?.model;
-          const preThinking = preExisting?.thinkingLevel;
-          const preMode = preExisting?.mode;
-
-          Effect.runPromise(
-            client.update((root) => {
-              const instance = root.plugin.kernel.agents.find(
-                (a) => a.id === agentId,
-              );
-              const configId = instance?.configId;
-              if (configId) {
-                const template = root.plugin.kernel.agentConfigs.find(
-                  (c) => c.id === configId,
-                );
-                if (template) {
-                  template.availableModels = extracted.availableModels;
-                  template.availableThinkingLevels =
-                    extracted.availableThinkingLevels;
-                  template.availableModes = extracted.availableModes;
-                }
-              }
-              if (instance) {
-                if (!instance.model && extracted.defaultModel) {
-                  instance.model = extracted.defaultModel;
-                }
-                if (!instance.thinkingLevel && extracted.defaultThinkingLevel) {
-                  instance.thinkingLevel = extracted.defaultThinkingLevel;
-                }
-                if (!instance.mode && extracted.defaultMode) {
-                  instance.mode = extracted.defaultMode;
-                }
-              }
-              if (configId) {
-                for (const agent of root.plugin.kernel.agents) {
-                  if (agent.configId !== configId) continue;
-                  validateAgentSelections(agent, extracted);
-                }
-              }
-            }),
-          ).catch(() => {});
-
-          // Push pre-set config values to ACP only if still valid in new available options
-          const process = this.processes.get(agentId);
-          if (process) {
-            if (
-              preModel &&
-              preModel !== extracted.defaultModel &&
-              (!extracted.availableModels.length ||
-                extracted.availableModels.some((m) => m.value === preModel))
-            ) {
-              Effect.runPromise(
-                process.setSessionConfigOption("model", preModel),
-              ).catch(() => {});
-            }
-            if (
-              preThinking &&
-              preThinking !== extracted.defaultThinkingLevel &&
-              (!extracted.availableThinkingLevels.length ||
-                extracted.availableThinkingLevels.some(
-                  (t) => t.value === preThinking,
-                ))
-            ) {
-              Effect.runPromise(
-                process.setSessionConfigOption("reasoning_effort", preThinking),
-              ).catch(() => {});
-            }
-            if (
-              preMode &&
-              preMode !== extracted.defaultMode &&
-              (!extracted.availableModes.length ||
-                extracted.availableModes.some((m) => m.value === preMode))
-            ) {
-              Effect.runPromise(
-                process.setSessionConfigOption("mode", preMode),
-              ).catch(() => {});
-            }
-          }
-        },
-        onConfigChange: (options) => {
-          const extracted = extractFromAcpConfig(options as any[]);
-          Effect.runPromise(
-            client.update((root) => {
-              const instance = root.plugin.kernel.agents.find(
-                (a) => a.id === agentId,
-              );
-              if (!instance) return;
-
-              // Overwrite template available options so UI reflects new config
-              const configId = instance.configId;
-              if (configId) {
-                const template = root.plugin.kernel.agentConfigs.find(
-                  (c) => c.id === configId,
-                );
-                if (template) {
-                  template.availableModels = extracted.availableModels;
-                  template.availableThinkingLevels =
-                    extracted.availableThinkingLevels;
-                  template.availableModes = extracted.availableModes;
-                }
-              }
-
-              // Update this agent's current values from ACP
-              if (extracted.defaultModel)
-                instance.model = extracted.defaultModel;
-              if (extracted.defaultThinkingLevel)
-                instance.thinkingLevel = extracted.defaultThinkingLevel;
-              if (extracted.defaultMode) instance.mode = extracted.defaultMode;
-
-              // Validate all other agents with same configId against new options
-              if (configId) {
-                for (const agent of root.plugin.kernel.agents) {
-                  if (agent.id === agentId || agent.configId !== configId)
-                    continue;
-                  validateAgentSelections(agent, extracted);
-                }
-              }
-            }),
-          ).catch(() => {});
-        },
       }),
     );
 
@@ -440,24 +190,18 @@ export class AgentService extends Service {
     return [...this.processes.keys()];
   }
 
-  private async setAgentStatus(agentId: string, status: "idle" | "streaming") {
+  /**
+   * Used only for pre-Agent-creation failures (startCommand parsing errors,
+   * ensureProcess throwing before the Agent instance exists). Once the
+   * Agent class is running, it syncs `processState` / `status` / `lastFinishedAt`
+   * itself from its state machine via `_setState`.
+   */
+  private async markProcessErrored(agentId: string) {
     const client = this.ctx.db.client;
     await Effect.runPromise(
       client.update((root) => {
         const agent = root.plugin.kernel.agents.find((a) => a.id === agentId);
-        if (!agent) return;
-        agent.status = status;
-        if (status === "idle") agent.lastFinishedAt = Date.now();
-      }),
-    ).catch(() => {});
-  }
-
-  private async setProcessState(agentId: string, processState: string) {
-    const client = this.ctx.db.client;
-    await Effect.runPromise(
-      client.update((root) => {
-        const agent = root.plugin.kernel.agents.find((a) => a.id === agentId);
-        if (agent) agent.processState = processState;
+        if (agent) agent.processState = "error";
       }),
     ).catch(() => {});
   }
@@ -507,27 +251,8 @@ export class AgentService extends Service {
       const cwd = agentCwd || path.join(os.homedir(), ".zenbu");
 
       let collectedText = "";
-      const eventLog: EventLog = {
-        append: (events) => {
-          for (const update of events) {
-            const u = update as any;
-            if (
-              u.sessionUpdate === "agent_message_chunk" &&
-              u.content?.type === "text"
-            ) {
-              collectedText += u.content.text;
-            }
-          }
-          return Effect.void;
-        },
-      };
-
-      const store: AgentStore = {
-        getSessionId: () => Effect.succeed(null),
-        setSessionId: () => Effect.void,
-        deleteSessionId: () => Effect.void,
-      };
-
+      // Ephemeral sub-agent: no `db`, no persistence. Hooks into
+      // onSessionUpdate to accumulate assistant text.
       const summaryAgent = await Effect.runPromise(
         Agent.create({
           id: `summarization-${agentId}`,
@@ -536,15 +261,23 @@ export class AgentService extends Service {
             args,
             cwd,
             env: extraEnv,
-            handlers: {
-              requestPermission: async () => ({
-                outcome: { outcome: "selected" as const, optionId: "allow" },
-              }),
-            },
+            // Summarization is ephemeral (no `db`) so it can't route
+            // permission requests via the event log. Leave `handlers`
+            // empty; AcpClient's auto-allow default kicks in. In practice
+            // the summarization sub-agent has no tools so this never
+            // fires.
           },
           cwd,
-          eventLog,
-          store,
+          onSessionUpdate: (update) => {
+            const u = update ;
+            if (
+              u.sessionUpdate === "agent_message_chunk" &&
+              u.content?.type === "text"
+            ) {
+              collectedText += u.content.text;
+            }
+          },
+          mcpProxyCommand: readZenbuPaths().bunPath,
         }),
       );
 
@@ -590,10 +323,13 @@ export class AgentService extends Service {
   async send(agentId: string, text: string, images?: ImageRef[]) {
     const agent = await this.ensureProcess(agentId);
 
-    const isFirstMessage = !(this.hasSentFirst ??= new Set()).has(agentId);
-    if (isFirstMessage) {
-      this.hasSentFirst.add(agentId);
-    }
+    // "First message" = the agent's first-prompt latch hasn't fired yet,
+    // persisted on the record itself (`firstPromptSentAt`). The Agent class
+    // flips this during send(); reading it here BEFORE dispatch gives us
+    // the pre-send value. Used solely to gate one-shot title generation.
+    const kernel = this.ctx.db.client.readRoot().plugin.kernel;
+    const isFirstMessage =
+      kernel.agents.find((a) => a.id === agentId)?.firstPromptSentAt == null;
 
     if (isFirstMessage && text) {
       this.generateTitle(agentId, text).catch((err) => {
@@ -625,19 +361,15 @@ export class AgentService extends Service {
 
     if (contentBlocks.length === 0) return;
 
-    await this.setAgentStatus(agentId, "streaming");
-    try {
-      await Effect.runPromise(agent.send(contentBlocks as any));
-    } finally {
-      await this.setAgentStatus(agentId, "idle");
-    }
+    // status ("streaming" while prompting, "idle" otherwise) and
+    // lastFinishedAt are now maintained by the Agent class via its state
+    // machine, so no pre/post wrapping is needed here.
+    await Effect.runPromise(agent.send(contentBlocks as any));
   }
 
   async appendUserPrompt(agentId: string, text: string) {
     const client = this.ctx.db.client;
-    const agentNode = client.plugin.kernel.agents.find(
-      (a) => a.id === agentId,
-    );
+    const agentNode = client.plugin.kernel.agents.find((a) => a.id === agentId);
     if (!agentNode) return;
 
     const now = Date.now();
@@ -676,9 +408,7 @@ export class AgentService extends Service {
     await Effect.runPromise(agent.interrupt()).catch(() => {});
 
     const client = this.ctx.db.client;
-    const agentNode = client.plugin.kernel.agents.find(
-      (a) => a.id === agentId,
-    );
+    const agentNode = client.plugin.kernel.agents.find((a) => a.id === agentId);
     if (agentNode) {
       await Effect.runPromise(
         agentNode.eventLog.concat([
@@ -687,7 +417,9 @@ export class AgentService extends Service {
       ).catch(() => {});
     }
 
-    await this.setAgentStatus(agentId, "idle");
+    // `status` flips back to "idle" automatically when the Agent's state
+    // machine transitions out of "prompting" (see _setState in the agent
+    // class).
 
     // If a prompt was included with the interrupt, append it and send it
     // Server handles ordering so user_prompt appears after the interrupted event
@@ -703,15 +435,20 @@ export class AgentService extends Service {
     const newTemplate = kernel.agentConfigs.find((c) => c.id === newConfigId);
     if (!newTemplate) return;
 
+    // Seed the instance from the NEW kind's defaultConfiguration so the
+    // toolbar has sensible values the moment the switch lands, rather than
+    // three empty selects until ACP handshakes.
+    const seeded = validSelectionFromTemplate(newTemplate);
+
     await Effect.runPromise(
       client.update((root) => {
         const agent = root.plugin.kernel.agents.find((a) => a.id === agentId);
         if (!agent) return;
         agent.configId = newConfigId;
         agent.startCommand = newTemplate.startCommand;
-        delete (agent as any).model;
-        delete (agent as any).thinkingLevel;
-        delete (agent as any).mode;
+        agent.model = seeded.model;
+        agent.thinkingLevel = seeded.thinkingLevel;
+        agent.mode = seeded.mode;
         agent.processState = "initializing";
         root.plugin.kernel.selectedConfigId = newConfigId;
       }),
@@ -727,14 +464,14 @@ export class AgentService extends Service {
         await Effect.runPromise(process.changeStartCommand(command, args));
       } catch (err) {
         console.error(`[agent] changeStartCommand failed for ${agentId}:`, err);
-        await this.setProcessState(agentId, "error");
+        await this.markProcessErrored(agentId);
       }
     } else {
       try {
         await this.ensureProcess(agentId);
       } catch (err) {
         console.error(`[agent] ensureProcess failed for ${agentId}:`, err);
-        await this.setProcessState(agentId, "error");
+        await this.markProcessErrored(agentId);
       }
     }
   }

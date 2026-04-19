@@ -2,7 +2,7 @@ export { createDb } from "./db/db";
 export type { Db, CreateDbConfig, SectionConfig } from "./db/db";
 
 export { createClient } from "./client/client";
-export type { ClientProxy, CollectionNode, BlobNode, FieldNode, EffectFieldNode, EffectCollectionNode } from "./client/client";
+export type { ClientProxy, CollectionNode, BlobNode, FieldNode, EffectFieldNode, EffectCollectionNode, EffectClientProxy, EffectArrayFieldNode } from "./client/client";
 
 export { createReplica } from "./replica/replica";
 export type { CreateReplicaArgs } from "./replica/replica";

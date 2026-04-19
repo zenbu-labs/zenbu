@@ -8,7 +8,11 @@ import { makeCollection } from "@zenbu/kyju/schema";
 import { Service, runtime } from "../runtime";
 import { DbService } from "./db";
 import { INTERNAL_DIR, RUNTIME_JSON, SOCKET_DIR, CLI_SOCKET_PATH } from "../../../shared/paths";
-import { insertHotAgent, type ArchivedAgent } from "../../../shared/agent-ops";
+import {
+  insertHotAgent,
+  validSelectionFromTemplate,
+  type ArchivedAgent,
+} from "../../../shared/agent-ops";
 
 const DB_PATH = path.join(process.cwd(), ".zenbu", "db");
 const DEFAULT_CWD = path.join(os.homedir(), ".zenbu");
@@ -94,6 +98,9 @@ export class CliSocketService extends Service {
           client.update((root) => {
             const k = root.plugin.kernel;
 
+            const template = k.agentConfigs.find((c) => c.id === matched.id);
+            const seeded = template ? validSelectionFromTemplate(template) : {};
+
             evicted = insertHotAgent(k, {
               id: agentId!,
               name: matched.name,
@@ -105,6 +112,7 @@ export class CliSocketService extends Service {
                 collectionId: nanoid(),
                 debugName: "eventLog",
               }),
+              ...seeded,
               title: { kind: "not-available" },
               reloadMode: "keep-alive",
               sessionId: null,

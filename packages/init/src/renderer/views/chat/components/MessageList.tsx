@@ -36,7 +36,7 @@ export type MessageListProps = {
   debugExpectedVisibleMessageRef?: React.MutableRefObject<ExpectedVisibleMessage | null>
   initialMeasurementCache?: Record<string, any>
   scrollToIndexOnMount?: number
-  onPermissionSelect?: (toolCallId: string, optionId: string) => void
+  onPermissionSelect?: (requestId: string, optionId: string | "__cancel__") => void
   onQuestionSubmit?: (toolCallId: string, answer: string) => void
   onScrollMetrics?: (metrics: ScrollMetrics) => void
   hasMoreAbove?: boolean
@@ -547,7 +547,7 @@ function MessageRow({
 }: {
   message: MaterializedMessage
   components: ChatComponents
-  onPermissionSelect?: (toolCallId: string, optionId: string) => void
+  onPermissionSelect?: (requestId: string, optionId: string | "__cancel__") => void
   onQuestionSubmit?: (toolCallId: string, answer: string) => void
 }) {
   switch (msg.role) {
@@ -578,13 +578,16 @@ function MessageRow({
     case "permission_request":
       return (
         <C.PermissionRequest
+          requestId={msg.requestId}
           toolCallId={msg.toolCallId}
           title={msg.title}
           kind={msg.kind}
           description={msg.description}
           options={msg.options}
+          selectedOptionId={msg.selectedOptionId}
+          cancelled={msg.cancelled}
           onSelect={(optionId) =>
-            onPermissionSelect?.(msg.toolCallId, optionId)
+            onPermissionSelect?.(msg.requestId, optionId)
           }
         />
       )

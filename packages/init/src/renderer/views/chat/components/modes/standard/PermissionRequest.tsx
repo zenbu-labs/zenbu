@@ -9,6 +9,8 @@ export function PermissionRequest(props: PermissionRequestProps) {
         kind={props.kind}
         description={props.description}
         options={props.options}
+        selectedOptionId={props.selectedOptionId}
+        cancelled={props.cancelled}
         onSelect={props.onSelect}
       />
     </div>

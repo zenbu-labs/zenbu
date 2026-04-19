@@ -21,7 +21,11 @@ import { HttpService } from "./http";
 import { ReloaderService } from "./reloader";
 import { RpcService } from "./rpc";
 import { registerAdvice, registerContentScript } from "./advice-config";
-import { insertHotAgent, type ArchivedAgent } from "../../../shared/agent-ops";
+import {
+  insertHotAgent,
+  validSelectionFromTemplate,
+  type ArchivedAgent,
+} from "../../../shared/agent-ops";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -73,6 +77,8 @@ export class WindowService extends Service {
     const agentId = nanoid();
     const sessionId = nanoid();
 
+    const seeded = validSelectionFromTemplate(selectedConfig);
+
     let evicted: ArchivedAgent[] = [];
     await Effect.runPromise(
       client.update((root) => {
@@ -88,6 +94,7 @@ export class WindowService extends Service {
             collectionId: nanoid(),
             debugName: "eventLog",
           }),
+          ...seeded,
           title: { kind: "not-available" },
           reloadMode: "keep-alive",
           sessionId: null,

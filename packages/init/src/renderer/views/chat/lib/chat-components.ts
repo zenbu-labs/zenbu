@@ -39,12 +39,27 @@ export type PlanProps = {
 }
 
 export type PermissionRequestProps = {
+  /**
+   * Stable id used to pair a response to this request. The UI passes it
+   * through `onSelect`; the response is written to the event log under
+   * the same id so the agent-process subscription can resolve the
+   * corresponding pending ACP call.
+   */
+  requestId: string
   toolCallId: string
   title: string
   kind: string
   description: string
   options: PermissionOption[]
-  onSelect: (optionId: string) => void
+  /**
+   * User picked one of the `options` (by optionId) or cancelled. The
+   * caller is responsible for writing the response event — the component
+   * is otherwise a dumb renderer.
+   */
+  onSelect: (optionId: string | "__cancel__") => void
+  /** Set once the matching permission_response has been observed. */
+  selectedOptionId?: string
+  cancelled?: boolean
 }
 
 export type AskQuestionProps = {

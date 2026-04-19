@@ -1,5 +1,6 @@
 import { useMemo, useCallback, useRef, useState } from "react";
 import { useCollection, useDb } from "../../lib/kyju-react";
+import { useKyjuClient } from "../../lib/providers";
 import { MessageList } from "./components/MessageList";
 import type {
   MessageListHandle,
@@ -26,8 +27,45 @@ export function ChatDisplay({
   const agent = useDb((root) =>
     root.plugin.kernel.agents.find((a) => a.id === agentId),
   );
+  const client = useKyjuClient();
   const streaming = agent?.status === "streaming";
   const { items: allEvents } = useCollection(agent?.eventLog);
+
+  /**
+   * Permission-prompt response: user clicked a button (or cancelled).
+   * Writes a `permission_response` event into the agent's eventLog, which
+   * the agent process's subscription picks up and feeds back to ACP.
+   * No RPC needed — the event log IS the bus.
+   */
+  const handlePermissionSelect = useCallback(
+    async (requestId: string, optionId: string | "__cancel__") => {
+      const agentNode = client.plugin.kernel.agents
+        .read()
+        .find((a) => a.id === agentId);
+      if (!agentNode?.eventLog) return;
+      const collectionRef = client.plugin.kernel.agents
+        .read()
+        .findIndex((a) => a.id === agentId);
+      if (collectionRef < 0) return;
+      const outcome =
+        optionId === "__cancel__"
+          ? ({ outcome: "cancelled" as const })
+          : ({ outcome: "selected" as const, optionId });
+      await client.plugin.kernel.agents[collectionRef].eventLog
+        .concat([
+          {
+            timestamp: Date.now(),
+            data: {
+              kind: "permission_response",
+              requestId,
+              outcome,
+            },
+          },
+        ])
+        .catch(() => {});
+    },
+    [client, agentId],
+  );
   const allMessages = useMemo(
     () => materializeMessages(allEvents as any),
     [allEvents],
@@ -89,6 +127,7 @@ export function ChatDisplay({
         onLoadNewer={loadNewer}
         onDetachedFromBottom={freezeTail}
         onReachedBottom={resumeTail}
+        onPermissionSelect={handlePermissionSelect}
       />
       <Minimap scrollMetrics={scrollMetrics} onScrollTo={handleScrollTo} />
     </div>
