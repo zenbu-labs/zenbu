@@ -71,6 +71,7 @@ function AgentIcon({
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     let revoke: string | null = null;
+    // fixme should not be any
     (client as any).getBlobData(blobId).then((data: Uint8Array | null) => {
       if (!data) return;
       const blob = new Blob([data as BlobPart], { type: "image/svg+xml" });

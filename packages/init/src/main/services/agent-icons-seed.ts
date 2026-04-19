@@ -8,7 +8,7 @@ import { DbService } from "./db";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ICONS_DIR = path.resolve(__dirname, "../../../shared/default-icons");
 
-const SEEDED_IDS = ["codex", "claude"] as const;
+const SEEDED_IDS = ["codex", "claude", "cursor", "opencode", "copilot"] as const;
 
 export class AgentIconsSeedService extends Service {
   static key = "agent-icons-seed";
