@@ -170,7 +170,70 @@ function walkForImages(
   }
 }
 
-// ---- Built-in serializers (file, image, folder) ----
+// ---- Built-in serializers ----
+
+/**
+ * Generic "named reference" — a titled pill whose prompt representation is an
+ * XML block with optional attributes and optional body content. Subsumes the
+ * per-feature kinds (file, folder, turn summary, future labelled blocks). New
+ * contexts that want pill-backed prompt injection should reach for this first;
+ * only introduce a new `kind` when the serialization genuinely differs (e.g.
+ * images, which produce ACP image content blocks instead of XML).
+ *
+ * data shape:
+ *   tag: string                 // XML element name, e.g. "file_reference"
+ *   attrs?: Record<string,string>  // attributes on the open tag
+ *   content?: string            // body between open/close tags; omit for self-closing
+ *   inlineLabel?: string        // inline placeholder prefix, e.g. "File Reference";
+ *                               // when set, body inline reads `[<label> N: <title>]`
+ *                               // and the open tag gets `number="N"`. Omit for
+ *                               // `[<title>]` inline + no numbering.
+ */
+function escapeAttr(v: string): string {
+  return v
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+}
+
+registerSerializer({
+  kind: "reference",
+  toText(payload, ctx) {
+    const data = payload.data as {
+      tag?: string
+      inlineLabel?: string
+    }
+    const title = payload.title || "reference"
+    if (data.inlineLabel && data.tag) {
+      const n = ctx.next(data.tag)
+      return `[${data.inlineLabel} ${n}: ${title}]`
+    }
+    // Unlabeled references still bump the per-tag counter so the trailer's
+    // numbering (if it later needs one) stays in lockstep with body order.
+    if (data.tag) ctx.next(data.tag)
+    return `[${title}]`
+  },
+  toTrailer(payload, ctx) {
+    const data = payload.data as {
+      tag?: string
+      attrs?: Record<string, string>
+      content?: string
+      inlineLabel?: string
+    }
+    if (!data.tag) return ""
+    const n = ctx.next(data.tag)
+    const numbered = !!data.inlineLabel
+    const pairs: string[] = []
+    if (numbered) pairs.push(`number="${n}"`)
+    for (const [k, v] of Object.entries(data.attrs ?? {})) {
+      pairs.push(`${k}="${escapeAttr(String(v))}"`)
+    }
+    const open = `<${data.tag}${pairs.length ? " " + pairs.join(" ") : ""}`
+    if (data.content == null) return `${open} />\n`
+    return `${open}>\n${data.content}\n</${data.tag}>\n`
+  },
+})
 
 registerSerializer({
   kind: "file",

@@ -43,6 +43,18 @@ export type ZenbuEvents = {
      */
     relaunchRequested: { requestId: string; pluginName: string; reason: string }
   }
+  quickChat: {
+    /**
+     * Emitted by the quick-chat shortcut handler when the user presses
+     * cmd+e. The orchestrator advice subscribes per-window; on match, it
+     * resolves the focused agent, builds the turn-summary token, spawns a
+     * cursor sub-agent, and mounts the floating chat modal.
+     */
+    openRequested: {
+      windowId: string | null
+      ts: number
+    }
+  }
   fileViewer: {
     /**
      * Emitted by `FileViewerService.callExtension` to ask the connected VSCode

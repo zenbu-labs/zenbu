@@ -106,6 +106,52 @@ export class InsertService extends Service {
     return { delivered: "persisted" };
   }
 
+  /**
+   * Agent-keyed insert — no session needed. Intended for callers that
+   * target a brand-new agent (e.g., the quick-chat plugin creates a cursor
+   * agent before any session/tab wraps it). Always writes to the persisted
+   * draft so the composer picks the token up at mount time.
+   *
+   * If the agent also happens to have a live session, that composer is
+   * already listening for draft changes via the refocus-rehydrate flow;
+   * there's no benefit to the "live event" fast path here and plenty of
+   * simplicity to gain by staying single-path.
+   */
+  async insertTokenForAgent(args: {
+    agentId: string;
+    payload: TokenPayload;
+  }): Promise<{ ok: boolean }> {
+    const client = this.ctx.db.client;
+    await Effect.runPromise(
+      client.update((root) => {
+        const drafts = root.plugin.kernel.composerDrafts ?? {};
+        const existing = drafts[args.agentId];
+        const nextEditorState = appendTokenToEditorState(
+          existing?.editorState,
+          args.payload,
+        );
+        const nextBlobs = [
+          ...(existing?.chatBlobs ?? []),
+          ...((args.payload.blobs ?? []).map((b) => ({
+            blobId: b.blobId,
+            mimeType: b.mimeType,
+          }))),
+        ];
+        root.plugin.kernel.composerDrafts = {
+          ...drafts,
+          [args.agentId]: {
+            editorState: nextEditorState as any,
+            chatBlobs: nextBlobs,
+          },
+        };
+      }),
+    ).catch((err) => {
+      console.error("[insert] insertTokenForAgent persist failed:", err);
+      return { ok: false };
+    });
+    return { ok: true };
+  }
+
   evaluate() {
     console.log("[insert] service ready");
   }

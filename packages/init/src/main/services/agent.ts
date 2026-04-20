@@ -522,6 +522,63 @@ export class AgentService extends Service {
     );
   }
 
+  /**
+   * One-shot read of an agent's eventLog off disk. The renderer's
+   * `useCollection` hook is great for live rendering but awkward for
+   * imperative flows (e.g., cmd+e "grab the last turn and summarize it");
+   * this method serves those by reading the collection's JSONL pages
+   * directly. Returns in timestamp order, empty when the collection is
+   * missing or empty.
+   */
+  async getAgentEvents(agentId: string): Promise<
+    Array<{ timestamp: number; data: unknown }>
+  > {
+    const kernel = this.ctx.db.client.readRoot().plugin.kernel;
+    const agent = kernel.agents.find((a) => a.id === agentId);
+    const collectionId = (agent?.eventLog as any)?.collectionId as
+      | string
+      | undefined;
+    if (!collectionId) return [];
+    const collectionDir = path.join(
+      process.cwd(),
+      ".zenbu",
+      "db",
+      "collections",
+      collectionId,
+    );
+    const indexPath = path.join(collectionDir, "index.json");
+    let index: { activePageId?: string; pages?: string[] };
+    try {
+      index = JSON.parse(await fsp.readFile(indexPath, "utf8"));
+    } catch {
+      return [];
+    }
+    const pageIds: string[] = [];
+    if (Array.isArray(index.pages)) pageIds.push(...index.pages);
+    if (index.activePageId && !pageIds.includes(index.activePageId)) {
+      pageIds.push(index.activePageId);
+    }
+    const items: Array<{ timestamp: number; data: unknown }> = [];
+    for (const pageId of pageIds) {
+      const dataPath = path.join(collectionDir, "pages", pageId, "data.jsonl");
+      try {
+        const raw = await fsp.readFile(dataPath, "utf8");
+        for (const line of raw.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            items.push(JSON.parse(trimmed));
+          } catch {
+            // skip malformed
+          }
+        }
+      } catch {
+        // page missing
+      }
+    }
+    return items;
+  }
+
   async changeCwd(agentId: string, newCwd: string) {
     const client = this.ctx.db.client;
     await Effect.runPromise(

@@ -61,7 +61,12 @@ export class CliService extends Service {
   private pendingRelaunches = new Map<string, (d: RelaunchDecision) => void>();
 
   ping() {
-    return { ok: true, pid: process.pid, wsPort: this.ctx.http.port , extra: ' observe me 101'};
+    return {
+      ok: true,
+      pid: process.pid,
+      wsPort: this.ctx.http.port,
+      extra: " observe me 101",
+    };
   }
 
   listAgents() {
@@ -135,6 +140,11 @@ export class CliService extends Service {
               sidebarOpen: false,
               tabSidebarOpen: true,
               sidebarPanel: "overview",
+
+              /**
+               * come back to this
+               */
+              persisted: false,
             },
           ];
         }),
@@ -176,6 +186,11 @@ export class CliService extends Service {
               sidebarOpen: false,
               tabSidebarOpen: true,
               sidebarPanel: "overview",
+
+              /**
+               * come back to this
+               */
+              persisted: false,
             },
           ];
         }),
@@ -194,6 +209,11 @@ export class CliService extends Service {
               sidebarOpen: false,
               tabSidebarOpen: true,
               sidebarPanel: "overview",
+
+              /**
+               * come back to this
+               */
+              persisted: false,
             },
           ];
         }),
@@ -280,7 +300,9 @@ export class CliService extends Service {
     this.writeRuntimeJson();
     this.effect("runtime-json-cleanup", () => {
       return () => {
-        try { fs.unlinkSync(RUNTIME_JSON); } catch {}
+        try {
+          fs.unlinkSync(RUNTIME_JSON);
+        } catch {}
       };
     });
     console.log("[cli] service ready");

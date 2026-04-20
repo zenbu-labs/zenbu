@@ -4,37 +4,10 @@ import { Streamdown } from "streamdown"
 import { tokenizeLines, langFromPath } from "@zenbu/diffs"
 import type { SyntaxToken } from "@zenbu/diffs"
 import { streamdownProps } from "../lib/streamdown-config"
-import type { MaterializedMessage, ToolMessageData, ToolCallContentItem } from "../lib/materialize"
+import type { MaterializedMessage } from "../lib/materialize"
+import { getLastTurnData } from "../lib/turn-summary"
 
-type DiffEntry = {
-  path: string
-  oldText: string
-  newText: string
-}
-
-function collectDiffs(tool: ToolMessageData): DiffEntry[] {
-  const diffs: DiffEntry[] = []
-  for (const item of tool.contentItems) {
-    if (item.type === "diff") {
-      diffs.push({ path: item.path, oldText: item.oldText ?? "", newText: item.newText })
-    }
-  }
-  for (const child of tool.children) {
-    diffs.push(...collectDiffs(child))
-  }
-  return diffs
-}
-
-function isWriteTool(tool: ToolMessageData): boolean {
-  const name = (tool.toolName ?? "").toLowerCase()
-  return name === "write" || tool.kind === "create"
-}
-
-function getWritePath(tool: ToolMessageData): string | null {
-  if (!isWriteTool(tool)) return null
-  const input = tool.rawInput as Record<string, any> | null
-  return input?.file_path ?? input?.path ?? null
-}
+export { getLastTurnData } from "../lib/turn-summary"
 
 function fileBasename(p: string): string {
   return p.split("/").pop() ?? p
@@ -146,83 +119,6 @@ function CreatedFileBody({ path, content, tab }: { path: string; content: string
       <SyntaxView code={content} path={path} />
     </div>
   )
-}
-
-function getLastTurnData(messages: MaterializedMessage[]) {
-  let lastUserIdx = -1
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "user") { lastUserIdx = i; break }
-  }
-  console.log("[TurnSummary] getLastTurnData start", { messagesLength: messages.length, lastUserIdx })
-  if (lastUserIdx === -1) {
-    console.log("[TurnSummary] bail: no user message found")
-    return null
-  }
-
-  const diffs: DiffEntry[] = []
-  const createdFiles = new Set<string>()
-  const createdFileContents = new Map<string, string>()
-  const editedFiles = new Set<string>()
-
-  const turnToolSummaries: unknown[] = []
-
-  for (let i = lastUserIdx + 1; i < messages.length; i++) {
-    const msg = messages[i]
-    if (msg.role === "tool") {
-      const writePath = getWritePath(msg)
-      if (writePath) {
-        createdFiles.add(writePath)
-        const input = (msg as ToolMessageData).rawInput as Record<string, any> | null
-        const content = input?.content ?? input?.contents ?? ""
-        if (typeof content === "string" && content) {
-          createdFileContents.set(writePath, content)
-        }
-      }
-
-      const toolDiffs = collectDiffs(msg)
-      for (const d of toolDiffs) {
-        diffs.push(d)
-        if (!createdFiles.has(d.path)) {
-          editedFiles.add(d.path)
-        }
-      }
-
-      turnToolSummaries.push({
-        toolName: msg.toolName,
-        kind: msg.kind,
-        status: msg.status,
-        isWriteTool: isWriteTool(msg),
-        writePath,
-        contentItemTypes: msg.contentItems.map(c => c.type),
-        diffPaths: msg.contentItems.filter(c => c.type === "diff").map((c: any) => c.path),
-        childCount: msg.children.length,
-        children: msg.children.map(c => ({
-          toolName: c.toolName,
-          kind: c.kind,
-          contentItemTypes: c.contentItems.map(ci => ci.type),
-          diffPaths: c.contentItems.filter(ci => ci.type === "diff").map((ci: any) => ci.path),
-        })),
-        toolDiffsFound: toolDiffs.length,
-      })
-    } else {
-      turnToolSummaries.push({ nonToolRole: msg.role })
-    }
-  }
-
-  console.log("[TurnSummary] turn tool scan", {
-    diffsTotal: diffs.length,
-    createdFilesCount: createdFiles.size,
-    createdFiles: [...createdFiles],
-    editedFiles: [...editedFiles],
-    turnToolSummaries,
-  })
-
-  if (diffs.length === 0 && createdFiles.size === 0) {
-    console.log("[TurnSummary] bail: no diffs and no created files")
-    return null
-  }
-
-  return { diffs, createdFiles, createdFileContents, editedFiles }
 }
 
 export function TurnSummary({ messages, isLockedToBottom, scrollToBottom }: { messages: MaterializedMessage[]; isLockedToBottom: boolean; scrollToBottom?: () => void }) {

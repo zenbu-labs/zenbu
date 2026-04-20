@@ -114,6 +114,7 @@ export class WindowService extends Service {
             sidebarOpen: false,
             tabSidebarOpen: true,
             sidebarPanel: "overview",
+            persisted: false
           },
         ];
       }),
@@ -170,6 +171,7 @@ export class WindowService extends Service {
             sidebarOpen: false,
             tabSidebarOpen: true,
             sidebarPanel: "overview",
+            persisted: false
           },
         ];
       }),
@@ -272,6 +274,7 @@ export class WindowService extends Service {
             sidebarOpen: false,
             tabSidebarOpen: true,
             sidebarPanel: "overview",
+            persisted: false
           },
         ];
         const srcWs = k.windowStates.find(
@@ -520,6 +523,10 @@ export class WindowService extends Service {
             sidebarOpen: false,
             tabSidebarOpen: true,
             sidebarPanel: "overview",
+            /**
+             * come back to this 
+             */
+            persisted: false
           },
         ];
       }),

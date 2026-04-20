@@ -95,6 +95,7 @@ function SubmitPlugin({
   menuOpenRef,
   slashMenuOpenRef,
   reloadMenuOpenRef,
+  externalMenuOpenRef,
 }: {
   onSubmit: (
     text: string,
@@ -104,6 +105,7 @@ function SubmitPlugin({
   menuOpenRef: React.RefObject<boolean>;
   slashMenuOpenRef: React.RefObject<boolean>;
   reloadMenuOpenRef: React.RefObject<boolean>;
+  externalMenuOpenRef: React.RefObject<boolean>;
 }) {
   const [editor] = useLexicalComposerContext();
 
@@ -115,7 +117,8 @@ function SubmitPlugin({
         if (
           menuOpenRef.current ||
           slashMenuOpenRef.current ||
-          reloadMenuOpenRef.current
+          reloadMenuOpenRef.current ||
+          externalMenuOpenRef.current
         )
           return false;
         event?.preventDefault();
@@ -138,7 +141,7 @@ function SubmitPlugin({
       },
       COMMAND_PRIORITY_HIGH,
     );
-  }, [editor, onSubmit, menuOpenRef, slashMenuOpenRef, reloadMenuOpenRef]);
+  }, [editor, onSubmit, menuOpenRef, slashMenuOpenRef, reloadMenuOpenRef, externalMenuOpenRef]);
 
   return null;
 }
@@ -338,14 +341,20 @@ export function Composer({
   agentId,
   scrollToBottom,
   debugExpectedVisibleMessageRef,
+  slot,
+  menuOpen,
 }: {
   agentId: string;
   scrollToBottom?: () => void;
   debugExpectedVisibleMessageRef?: React.MutableRefObject<ExpectedVisibleMessage | null>;
+  slot?: React.ReactNode;
+  menuOpen?: boolean;
 }) {
   const filePickerOpenRef = useRef(false);
   const slashMenuOpenRef = useRef(false);
   const reloadMenuOpenRef = useRef(false);
+  const externalMenuOpenRef = useRef(false);
+  externalMenuOpenRef.current = menuOpen ?? false;
   const composerWrapperRef = useRef<HTMLDivElement | null>(null);
   const [reloadMenuOpen, setReloadMenuOpen] = useState(false);
   const rpc = useRpc();
@@ -520,6 +529,7 @@ export function Composer({
             menuOpenRef={filePickerOpenRef}
             slashMenuOpenRef={slashMenuOpenRef}
             reloadMenuOpenRef={reloadMenuOpenRef}
+            externalMenuOpenRef={externalMenuOpenRef}
           />
           <AutoFocusPlugin />
           <FilePickerPlugin menuOpenRef={filePickerOpenRef} agentId={agentId} />
@@ -540,6 +550,7 @@ export function Composer({
           <CtrlNPPlugin />
           <NodeDeletePlugin />
           <RichPastePlugin />
+          {slot}
         </LexicalComposer>
 
         <ReloadMenu

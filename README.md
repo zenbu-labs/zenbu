@@ -1,34 +1,44 @@
-<p align="center">
-  <img src="./docs/logo.png" alt="Zenbu" width="180" />
-</p>
+
 
 # Zenbu
 
-![status: beta](https://img.shields.io/badge/status-beta-orange)
+status: beta
 
 The extensible coding agent GUI.
 
-<p align="center">
-  <img src="./docs/screenshot.webp" alt="Zenbu" />
-</p>
+
 
 ## Installation
 
-Download the latest build from [zenbu.dev/download](https://www.zenbu.dev/download) or [GitHub Releases](https://github.com/zenbu-labs/zenbu/releases). Open the app and it sets itself up under `~/.zenbu/` on first launch.
+Download the latest build from [zenbu.dev/download](https://www.zenbu.dev/download) or [GitHub Releases](https://github.com/zenbu-labs/zenbu/releases).
 
-## Configuring agents
+When you launch the app, this repo will be cloned under ~/.zenbu/plugins. You can modify any source code of the app in this directory and changes will hot reload.
 
-Zenbu ships with **codex**, **claude**, **cursor**, **opencode**, and **copilot** preinstalled. It assumes you've already authenticated whichever one you want to use through its own CLI. You can add more agents (that are [acp compatible](https://agentclientprotocol.com/get-started/registry)) inside Zenbu Settings.
+### Dependencies:
+
+- git
 
 ## Plugins
 
-Zenbu is built out of plugins. Each plugin is a folder with its own manifest, code, and UI, and `~/.zenbu/config.jsonc` tracks which ones are loaded by absolute path. They can live anywhere on disk; by convention they go under `~/.zenbu/plugins/<name>/`. The core app is built the same way: it's a plugin that registers services, views, and schema just like any other.
+Zenbu is built out of plugins. Plugins are units of code that can modify the app's behavior.
 
-Browse the marketplace inside the app to install a plugin with one click, or run `zen init <name>` from the terminal to scaffold your own. The current catalog lives in [`registry.jsonl`](./registry.jsonl).
+Plugins are configured at `~/.zenbu/config.jsonc`:
+
+```
+{
+  "plugins": [
+    ...your plugin paths here
+  ]
+}
+```
+
+The plugin API is not yet stable or complete, but you can reference the [core plugin](https://github.com/zenbu-labs/zenbu/tree/main/packages/init) to learn about what plugin API's are available and how to setup a plugin
+
+## Configuring agents
+
+Zenbu ships with **codex**, **claude**, **cursor**, **opencode**, and **copilot** preconfigured. It assumes you've already authenticated whichever one you want to use through its own CLI. You can add more agents (that are [acp compatible](https://agentclientprotocol.com/get-started/registry)) inside Zenbu Settings.
 
 ## `zen` CLI
-
-The installer adds `zen` to your PATH. The common commands:
 
 ```bash
 zen                     # open a new window
@@ -40,7 +50,7 @@ zen link                # regenerate registry types after editing a service or s
 
 ### Inspect the database
 
-Zenbu's state lives in a local reactive database. `zen kyju db` dumps it from the terminal:
+Zenbu's state lives in a local reactive database named kyju, query it via the `zen` cli:
 
 ```bash
 zen kyju db root                # full root document
@@ -56,7 +66,7 @@ zen kyju generate --name add_my_field
 
 ### Script the running app
 
-`zen exec` runs TypeScript against a live RPC connection to the running app. `rpc` (typed) and `events` are bound in scope, so you can call any service method or subscribe to events without setting up a socket yourself:
+`zen exec` lets you call remote procedures exposed by plugins via [zenrpc](https://github.com/zenbu-labs/zenbu/tree/main/packages/zenrpc):
 
 ```bash
 zen exec -e 'console.log(await rpc.cli.listAgents())'
@@ -68,12 +78,6 @@ Run `zen --help` for the full list of subcommands.
 
 ## Some notes
 
-Very early project. Expect lots of bugs.
+This is a very early project and may include breaking changes on any commit
 
-The plugin API is not yet stable and incomplete.
-
-If an agent breaks your code, `git stash` inside `~/.zenbu/plugins/zenbu`, or delete `~/.zenbu/` and the app will reinstall itself on next launch.
-
-## Plugin API
-
-Work in progress. See [`DOCS.md`](./DOCS.md) for the current reference.
+If an agent or update breaks your code, `git stash` inside `~/.zenbu/plugins/zenbu`, or delete `~/.zenbu/` and the app will reinstall itself on next launch.
