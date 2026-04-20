@@ -1,12 +1,13 @@
 import { useCallback, useMemo, useState } from "react";
 import { useDb, useCollection } from "../../../lib/kyju-react";
 import { useRpc } from "../../../lib/providers";
+import { useShortcut } from "../../../lib/shortcut-handler";
 import {
-  CheckIcon,
   ChevronDownIcon,
   CopyIcon,
   FolderOpenIcon,
   FolderSyncIcon,
+  StarIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +23,12 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -57,17 +64,45 @@ export function ChangeCwdItem({
 function ModeCombobox({
   options,
   currentValue,
+  defaultValue,
   onSelect,
+  onSetDefault,
 }: {
   options: Array<{ value: string; name: string; description?: string }>;
   currentValue: string;
+  defaultValue: string | undefined;
   onSelect: (value: string) => void;
+  onSetDefault: (value: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const selected = options.find((o) => o.value === currentValue);
 
+  // Snapshot the active value at the moment the popover opens, and sort
+  // that row to the top for this session. Intentionally not recomputed on
+  // selection — keeping row positions stable while open avoids the layout
+  // shift of the just-clicked row jumping to the top under the cursor.
+  const [pinnedValue, setPinnedValue] = useState<string | null>(null);
+  const sortedOptions = useMemo(() => {
+    if (!pinnedValue) return options;
+    const idx = options.findIndex((o) => o.value === pinnedValue);
+    if (idx <= 0) return options;
+    return [options[idx]!, ...options.slice(0, idx), ...options.slice(idx + 1)];
+  }, [options, pinnedValue]);
+
+  useShortcut("chat.openMode", () => {
+    setPinnedValue(currentValue);
+    setOpen(true);
+  });
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <TooltipProvider delayDuration={600}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        if (next) setPinnedValue(currentValue);
+        setOpen(next);
+      }}
+    >
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
@@ -75,51 +110,94 @@ function ModeCombobox({
           aria-expanded={open}
           size="sm"
           className="h-6 shrink-0 justify-between gap-1 px-2 font-normal text-xs text-neutral-400 hover:text-neutral-600 shadow-none"
-          title="Mode"
         >
           <span className="truncate">{selected?.name ?? currentValue}</span>
           <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[280px] p-0" align="end">
+      <PopoverContent className="w-[320px] p-0" align="end">
         <Command>
           <CommandInput placeholder="Search modes…" className="h-9" />
           <CommandList>
             <CommandEmpty>No match.</CommandEmpty>
             <CommandGroup>
-              {options.map((opt) => (
-                <CommandItem
-                  key={opt.value}
-                  value={`${opt.name} ${opt.description ?? ""} ${opt.value}`}
-                  onSelect={() => {
-                    onSelect(opt.value);
-                    setOpen(false);
-                  }}
-                  className="flex flex-col items-start gap-0.5 py-2"
-                >
-                  <span className="flex w-full items-center gap-2">
-                    <span className="flex-1 truncate text-sm">{opt.name}</span>
-                    <CheckIcon
-                      className={cn(
-                        "size-4 shrink-0",
-                        currentValue === opt.value
-                          ? "opacity-100"
-                          : "opacity-0",
-                      )}
-                    />
-                  </span>
-                  {opt.description ? (
-                    <span className="line-clamp-2 w-full text-left text-xs text-muted-foreground">
-                      {opt.description}
+              {sortedOptions.map((opt) => {
+                const isActive = currentValue === opt.value;
+                const isDefault = defaultValue === opt.value;
+                return (
+                  <CommandItem
+                    key={opt.value}
+                    value={`${opt.name} ${opt.description ?? ""} ${opt.value}`}
+                    onSelect={() => {
+                      onSelect(opt.value);
+                      setOpen(false);
+                    }}
+                    className={cn(
+                      "group flex flex-col items-start gap-0.5 px-2 py-2",
+                      isActive &&
+                        "bg-neutral-100 data-[selected=true]:bg-neutral-100",
+                    )}
+                  >
+                    <span className="flex w-full items-center gap-2">
+                      <span
+                        className={cn(
+                          "flex-1 truncate text-sm",
+                          isActive && "font-medium text-neutral-900",
+                        )}
+                      >
+                        {opt.name}
+                      </span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            }}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (!isDefault) onSetDefault(opt.value);
+                            }}
+                            className={cn(
+                              "flex size-5 shrink-0 items-center justify-center rounded transition-opacity",
+                              isDefault
+                                ? "opacity-100 cursor-default"
+                                : "opacity-0 group-hover:opacity-60 hover:!opacity-100",
+                            )}
+                          >
+                            <StarIcon
+                              className={cn(
+                                "size-3.5",
+                                isDefault
+                                  ? "fill-yellow-400 text-yellow-500"
+                                  : "text-neutral-400",
+                              )}
+                            />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="left">
+                          {isDefault
+                            ? "Current default for new agents"
+                            : "Set as default for new agents"}
+                        </TooltipContent>
+                      </Tooltip>
                     </span>
-                  ) : null}
-                </CommandItem>
-              ))}
+                    {opt.description ? (
+                      <span className="line-clamp-2 w-full text-left text-xs text-muted-foreground">
+                        {opt.description}
+                      </span>
+                    ) : null}
+                  </CommandItem>
+                );
+              })}
             </CommandGroup>
           </CommandList>
         </Command>
       </PopoverContent>
     </Popover>
+    </TooltipProvider>
   );
 }
 
@@ -233,12 +311,22 @@ export function ComposerToolbar({ agentId }: { agentId: string }) {
   );
   const availableModes = template?.availableModes ?? [];
   const currentMode = agent?.mode ?? "";
+  const defaultMode = template?.defaultConfiguration?.mode;
+  const templateId = template?.id;
 
   const handleModeChange = useCallback(
     async (value: string) => {
       await rpc.agent.setConfigOption(agentId, "mode", value);
     },
     [rpc, agentId],
+  );
+
+  const handleSetDefaultMode = useCallback(
+    async (value: string) => {
+      if (!templateId) return;
+      await rpc.agent.setDefaultConfigOption(templateId, "mode", value);
+    },
+    [rpc, templateId],
   );
 
   const showCwd = !!agentCwd;
@@ -291,7 +379,9 @@ export function ComposerToolbar({ agentId }: { agentId: string }) {
           <ModeCombobox
             options={availableModes}
             currentValue={currentMode}
+            defaultValue={defaultMode}
             onSelect={handleModeChange}
+            onSetDefault={handleSetDefaultMode}
           />
         )}
         {usage && <ContextIndicator used={usage.used} size={usage.size} />}

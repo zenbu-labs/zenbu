@@ -1079,11 +1079,16 @@ export class Agent {
         value,
       });
 
-      // Mirror the user's selection onto TWO places:
-      //   1. `agents[i].{model|thinkingLevel|mode}` — live instance state
-      //   2. `agentConfigs[a.configId].defaultConfiguration.{...}` — the
-      //      saved default for this agent kind, so a freshly-spawned agent
-      //      of the same kind starts with this selection instead of nothing.
+      // Mirror the user's selection onto the live instance state
+      // (`agents[i].{model|thinkingLevel|mode}`).
+      //
+      // For model/thinkingLevel we also write the template default so a
+      // freshly-spawned agent of the same kind starts with the user's most
+      // recent pick. Mode is deliberately excluded: selecting a mode for
+      // one agent must not silently change what every new agent defaults
+      // to. The mode default is seeded once from ACP on first handshake
+      // (see `_reconcileConfigOptions`) and otherwise only changes via an
+      // explicit "set as default" action in the UI.
       //
       // ACP configId -> record field mapping:
       //   "model" -> model
@@ -1107,8 +1112,6 @@ export class Agent {
                 template.defaultConfiguration.model = value;
               } else if (configId === "reasoning_effort") {
                 template.defaultConfiguration.thinkingLevel = value;
-              } else if (configId === "mode") {
-                template.defaultConfiguration.mode = value;
               }
             }
           })

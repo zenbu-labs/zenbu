@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import { makeCollection } from "@zenbu/kyju/schema";
 import { Service, runtime } from "../runtime";
 import { DbService } from "./db";
+import { MAIN_WINDOW_ID } from "../../../shared/schema";
 import {
   insertHotAgent,
   validSelectionFromTemplate,
@@ -88,17 +89,46 @@ export class CliIntentService extends Service {
         const kernel = root.plugin.kernel;
 
         // Prune orphaned windowStates (from prior cold-started sessions with
-        // no matching live Electron window). Otherwise they accumulate
-        // forever and show up as stale entries in the recent-agents palette.
+        // no matching live Electron window). Persisted entries (e.g. the
+        // main window) are the source of truth across processes and must
+        // survive the prune even when no Electron window has adopted them
+        // yet.
         const liveWindowIds = new Set(this.ctx.baseWindow.windows.keys());
         const prunedCount = kernel.windowStates.filter(
-          (ws) => !liveWindowIds.has(ws.id),
+          (ws) => !liveWindowIds.has(ws.id) && !ws.persisted,
         ).length;
         if (prunedCount > 0) {
-          kernel.windowStates = kernel.windowStates.filter((ws) =>
-            liveWindowIds.has(ws.id),
+          kernel.windowStates = kernel.windowStates.filter(
+            (ws) => liveWindowIds.has(ws.id) || ws.persisted,
           );
           console.log(`[cli-intent] pruned ${prunedCount} orphaned windowStates`);
+        }
+
+        // Ensure the persisted main windowState exists. On first ever boot,
+        // create it; on upgrade from pre-`persisted` DBs, self-heal the
+        // flag; always prune sessions whose agentId no longer exists.
+        let mainWs = kernel.windowStates.find((ws) => ws.id === MAIN_WINDOW_ID);
+        if (!mainWs) {
+          kernel.windowStates = [
+            ...kernel.windowStates,
+            {
+              id: MAIN_WINDOW_ID,
+              sessions: [],
+              panes: [],
+              rootPaneId: null,
+              focusedPaneId: null,
+              sidebarOpen: false,
+              tabSidebarOpen: true,
+              sidebarPanel: "overview",
+              persisted: true,
+            },
+          ];
+          mainWs = kernel.windowStates.find((ws) => ws.id === MAIN_WINDOW_ID)!;
+        } else {
+          if (!mainWs.persisted) mainWs.persisted = true;
+          mainWs.sessions = mainWs.sessions.filter((s) =>
+            kernel.agents.some((a) => a.id === s.agentId),
+          );
         }
 
         if (existingAgentId) {
@@ -120,26 +150,12 @@ export class CliIntentService extends Service {
             return;
           }
 
-          const sessionId = nanoid();
-          const firstWindowId =
-            [...this.ctx.baseWindow.windows.keys()][0] ?? nanoid();
-          kernel.windowStates = [
-            ...kernel.windowStates,
+          mainWs.sessions = [
+            ...mainWs.sessions,
             {
-              id: firstWindowId,
-              sessions: [
-                {
-                  id: sessionId,
-                  agentId: existingAgentId,
-                  lastViewedAt: null,
-                },
-              ],
-              panes: [],
-              rootPaneId: null,
-              focusedPaneId: null,
-              sidebarOpen: false,
-              tabSidebarOpen: true,
-              sidebarPanel: "overview",
+              id: nanoid(),
+              agentId: existingAgentId,
+              lastViewedAt: null,
             },
           ];
         } else if (agent || fallbackToNewAgent) {
@@ -168,7 +184,6 @@ export class CliIntentService extends Service {
           const seeded = template ? validSelectionFromTemplate(template) : {};
 
           const agentId = nanoid();
-          const sessionId = nanoid();
           evicted = insertHotAgent(kernel, {
             id: agentId,
             name: matched.name,
@@ -188,20 +203,9 @@ export class CliIntentService extends Service {
             createdAt: Date.now(),
           });
 
-          const firstWindowId =
-            [...this.ctx.baseWindow.windows.keys()][0] ?? nanoid();
-          kernel.windowStates = [
-            ...kernel.windowStates,
-            {
-              id: firstWindowId,
-              sessions: [{ id: sessionId, agentId, lastViewedAt: null }],
-              panes: [],
-              rootPaneId: null,
-              focusedPaneId: null,
-              sidebarOpen: false,
-              tabSidebarOpen: true,
-              sidebarPanel: "overview",
-            },
+          mainWs.sessions = [
+            ...mainWs.sessions,
+            { id: nanoid(), agentId, lastViewedAt: null },
           ];
         }
       }),

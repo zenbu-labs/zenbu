@@ -224,20 +224,22 @@ function timeAgo(ts: number | undefined): string {
 
 function AgentPickerCombobox({
   agents,
-  sessions,
+  openAgentIds,
   onSelect,
 }: {
   agents: AgentItem[];
-  sessions: SessionItem[];
+  openAgentIds: Set<string>;
   onSelect: (agentId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const sortedAgents = useMemo(
     () =>
-      [...agents].sort(
-        (a, b) => (b.lastUserMessageAt ?? 0) - (a.lastUserMessageAt ?? 0),
-      ),
-    [agents],
+      [...agents]
+        .filter((a) => !openAgentIds.has(a.id))
+        .sort(
+          (a, b) => (b.lastUserMessageAt ?? 0) - (a.lastUserMessageAt ?? 0),
+        ),
+    [agents, openAgentIds],
   );
 
   return (
@@ -454,15 +456,15 @@ function ReloadMenu() {
 
 function TitleBar({
   agents,
-  sessions,
   hasTabs,
+  openAgentIds,
   onSettings,
   onNew,
   onLoadAgent,
 }: {
   agents: AgentItem[];
-  sessions: SessionItem[];
   hasTabs: boolean;
+  openAgentIds: Set<string>;
   onSettings: () => void;
   onNew: () => void;
   onLoadAgent: (agentId: string) => void;
@@ -488,7 +490,7 @@ function TitleBar({
         </button>
         <AgentPickerCombobox
           agents={agents}
-          sessions={sessions}
+          openAgentIds={openAgentIds}
           onSelect={onLoadAgent}
         />
       </div>
@@ -524,6 +526,13 @@ function OrchestratorContent() {
   );
   const sessions = windowState?.sessions ?? [];
   const agents = useDb((root) => root.plugin.kernel.agents);
+  const openAgentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const ws of allWindowStates) {
+      for (const s of ws.sessions ?? []) ids.add(s.agentId);
+    }
+    return ids;
+  }, [allWindowStates]);
   const registry = useDb((root) => root.plugin.kernel.viewRegistry);
   const client = useKyjuClient();
   const rpc = useRpc();
@@ -915,8 +924,8 @@ function OrchestratorContent() {
       >
         <TitleBar
           agents={agents}
-          sessions={sessions}
           hasTabs={hasTabs}
+          openAgentIds={openAgentIds}
           onSettings={() => setSettingsOpen(true)}
           onNew={handleNewGlobal}
           onLoadAgent={handleLoadAgent}

@@ -495,6 +495,33 @@ export class AgentService extends Service {
     }
   }
 
+  // Writes only the template's `defaultConfiguration` — no instance update,
+  // no ACP call. Used by the mode combobox's "set as default" affordance,
+  // which is intentionally split from `setConfigOption` so picking a mode
+  // for one agent doesn't silently change what every new agent of this
+  // kind starts in.
+  async setDefaultConfigOption(
+    configTemplateId: string,
+    configId: string,
+    value: string,
+  ) {
+    const client = this.ctx.db.client;
+    await Effect.runPromise(
+      client.update((root) => {
+        const template = root.plugin.kernel.agentConfigs.find(
+          (c) => c.id === configTemplateId,
+        );
+        if (!template) return;
+        if (!template.defaultConfiguration) template.defaultConfiguration = {};
+        if (configId === "model") template.defaultConfiguration.model = value;
+        else if (configId === "reasoning_effort")
+          template.defaultConfiguration.thinkingLevel = value;
+        else if (configId === "mode")
+          template.defaultConfiguration.mode = value;
+      }),
+    );
+  }
+
   async changeCwd(agentId: string, newCwd: string) {
     const client = this.ctx.db.client;
     await Effect.runPromise(

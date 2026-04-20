@@ -511,10 +511,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(
             ))}
 
             <div className={`shrink-0 ${loading ? "h-9" : "min-h-9 pb-4"}`}>
-              {(() => {
-                console.log("[TurnSummary/MessageList] gate", { loading, messagesLength: messages.length })
-                return null
-              })()}
+             
               {loading ? (
                 <C.Loading messages={messages} />
               ) : (

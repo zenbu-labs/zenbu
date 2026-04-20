@@ -256,7 +256,7 @@ function PaneTab({
         e.preventDefault();
         onContextMenu();
       }}
-      className={`group relative flex flex-1 items-center justify-center min-w-[120px] pl-7 pr-3 h-[45px] text-xs whitespace-nowrap overflow-hidden border-l border-r border-b ${
+      className={`group relative flex flex-1 items-center justify-center min-w-[120px] pl-7 pr-3 h-[48px] text-xs whitespace-nowrap overflow-hidden border-l border-r border-b ${
         isActive
           ? "text-neutral-900 bg-[#F4F4F4] border-l-[#BDBDBD] border-r-[#BDBDBD] border-b-transparent"
           : "text-neutral-500 hover:text-neutral-700 hover:bg-black/5 border-l-transparent border-r-transparent border-b-[#BDBDBD]"

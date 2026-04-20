@@ -1,6 +1,7 @@
 import { BaseWindow } from "electron"
 import { nanoid } from "nanoid"
 import { Service, runtime } from "../runtime"
+import { MAIN_WINDOW_ID } from "../../../shared/schema"
 
 type WindowBounds = { x: number; y: number; width: number; height: number }
 type SavedWindow = { windowId: string; bounds: WindowBounds }
@@ -56,7 +57,7 @@ export class BaseWindowService extends Service {
         }
         this.savedWindows = []
       } else {
-        this.createWindow()
+        this.createWindow({ windowId: MAIN_WINDOW_ID })
       }
     }
 

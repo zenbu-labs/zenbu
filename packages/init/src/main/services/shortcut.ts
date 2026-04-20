@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { app, webContents, type WebContents } from "electron";
 import { Effect } from "effect";
 import { Service, runtime } from "../runtime";
 import { DbService } from "./db";
@@ -22,14 +23,38 @@ export interface ShortcutDefinition {
   description: string;
   scope?: string;
   handler?: (ctx: DispatchContext) => void | Promise<void>;
+  /**
+   * If true, also capture this binding at the Electron webContents level via
+   * `before-input-event`, so keystrokes are intercepted before any renderer
+   * (including embedded iframes like code-server) consumes them. Window-
+   * scoped, NOT OS-wide — other apps keep their cmd+t. Default false; leave
+   * off unless the shortcut needs to beat a non-zenbu webContents.
+   */
+  captureAtWebContents?: boolean;
 }
 
 export interface DispatchContext {
   id: string;
+  /** The registered scope of the binding (static, from `register({ scope })`). */
   scope: string;
+  /**
+   * Scope as passed by the dispatcher — for iframe-originated keystrokes with
+   * a `"global"` binding, this is the origin iframe's scope (e.g. `"chat"`,
+   * `"settings"`). Main-process handlers gate on this when they need to know
+   * *where the key was actually pressed*, since `scope` is static.
+   */
+  originScope: string;
   windowId: string | null;
   paneId: string | null;
 }
+
+type ParsedBinding = {
+  key: string;
+  cmd: boolean;
+  ctrl: boolean;
+  alt: boolean;
+  shift: boolean;
+};
 
 interface ShortcutEntry {
   id: string;
@@ -37,6 +62,35 @@ interface ShortcutEntry {
   description: string;
   scope: string;
   handler?: (ctx: DispatchContext) => void | Promise<void>;
+  captureAtWebContents: boolean;
+  parsedBinding: ParsedBinding | null;
+}
+
+function parseBinding(binding: string): ParsedBinding {
+  const toks = binding.split("+").map((t) => t.trim().toLowerCase());
+  const b: ParsedBinding = {
+    key: "",
+    cmd: false,
+    ctrl: false,
+    alt: false,
+    shift: false,
+  };
+  for (const t of toks) {
+    if (t === "cmd" || t === "command" || t === "meta") b.cmd = true;
+    else if (t === "ctrl" || t === "control") b.ctrl = true;
+    else if (t === "alt" || t === "option") b.alt = true;
+    else if (t === "shift") b.shift = true;
+    else b.key = t;
+  }
+  return b;
+}
+
+function matchesBinding(b: ParsedBinding, input: Electron.Input): boolean {
+  if (!!input.meta !== b.cmd) return false;
+  if (!!input.control !== b.ctrl) return false;
+  if (!!input.alt !== b.alt) return false;
+  if (!!input.shift !== b.shift) return false;
+  return input.key.toLowerCase() === b.key;
 }
 
 export class ShortcutService extends Service {
@@ -44,7 +98,10 @@ export class ShortcutService extends Service {
   static deps = { db: DbService, rpc: RpcService };
   declare ctx: { db: DbService; rpc: RpcService };
 
-  private entries = new Map<string, ShortcutEntry>();
+  // Re-assigned in `evaluate()` so HMR doesn't strand an old instance missing
+  // the field (class-field initializers don't re-run on prototype swap).
+  private entries!: Map<string, ShortcutEntry>;
+  private lastDispatchedAt!: Map<string, number>;
 
   /**
    * Register a shortcut. Call from a service's `evaluate()`, wrap the returned
@@ -56,17 +113,22 @@ export class ShortcutService extends Service {
         `[shortcut] duplicate registration for "${def.id}" — shortcuts must have unique ids`,
       );
     }
+    const captureAtWebContents = def.captureAtWebContents ?? false;
     const entry: ShortcutEntry = {
       id: def.id,
       defaultBinding: def.defaultBinding,
       description: def.description,
       scope: def.scope ?? "global",
       handler: def.handler,
+      captureAtWebContents,
+      parsedBinding: captureAtWebContents
+        ? parseBinding(def.defaultBinding)
+        : null,
     };
     this.entries.set(def.id, entry);
     void this.syncRegistryToDb();
     console.log(
-      `[shortcut] registered "${entry.id}" (${entry.defaultBinding}) scope=${entry.scope}`,
+      `[shortcut] registered "${entry.id}" (${entry.defaultBinding}) scope=${entry.scope}${captureAtWebContents ? " [wc-capture]" : ""}`,
     );
     return () => {
       if (this.entries.get(def.id) === entry) {
@@ -94,6 +156,12 @@ export class ShortcutService extends Service {
         root.plugin.kernel.shortcutOverrides = overrides;
       }),
     );
+    // Keep the in-memory parsed binding in sync for webContents-capture
+    // shortcuts so the matcher sees the new combo on the next keystroke.
+    const entry = this.entries.get(id);
+    if (entry?.captureAtWebContents) {
+      entry.parsedBinding = parseBinding(binding ?? entry.defaultBinding);
+    }
     return { ok: true };
   }
 
@@ -134,15 +202,26 @@ export class ShortcutService extends Service {
     windowId: string | null,
     paneId: string | null,
   ): Promise<{ ok: boolean }> {
+    // De-dup the dual-capture race: a captureAtWebContents shortcut fired
+    // from inside a zenbu iframe can trip both the renderer capture and the
+    // main-process before-input-event hook. 50 ms is shorter than a realistic
+    // double-press and swallows the echo.
+    const now = Date.now();
+    const last = this.lastDispatchedAt.get(id) ?? 0;
+    if (now - last < 50) return { ok: true };
+    this.lastDispatchedAt.set(id, now);
+
     const entry = this.entries.get(id);
     const effectiveScope = entry?.scope ?? scope ?? "global";
+    const originScope = scope ?? effectiveScope;
     console.log(
-      `[shortcut] dispatch "${id}" scope=${effectiveScope} windowId=${windowId} paneId=${paneId}`,
+      `[shortcut] dispatch "${id}" scope=${effectiveScope} origin=${originScope} windowId=${windowId} paneId=${paneId}`,
     );
 
     const ctx: DispatchContext = {
       id,
       scope: effectiveScope,
+      originScope,
       windowId,
       paneId,
     };
@@ -159,6 +238,7 @@ export class ShortcutService extends Service {
       this.ctx.rpc.emit.shortcut.dispatched({
         id,
         scope: effectiveScope,
+        originScope,
         windowId,
         paneId,
         ts: Date.now(),
@@ -183,6 +263,9 @@ export class ShortcutService extends Service {
   }
 
   evaluate() {
+    this.entries ??= new Map<string, ShortcutEntry>();
+    this.lastDispatchedAt ??= new Map<string, number>();
+
     this.effect("content-script", () => {
       const remove = registerContentScript("*", CAPTURE_SCRIPT_PATH);
       console.log(
@@ -190,6 +273,57 @@ export class ShortcutService extends Service {
         CAPTURE_SCRIPT_PATH,
       );
       return remove;
+    });
+
+    // Window-level keystroke capture. Attaches a single `before-input-event`
+    // listener per webContents (current + future). Reads `this.entries` live
+    // on each keystroke so individual shortcut register/unregister doesn't
+    // need to rebind listeners.
+    this.effect("webContents-capture", () => {
+      const tracked = new Set<WebContents>();
+
+      const handleInput = (
+        event: Electron.Event,
+        input: Electron.Input,
+      ) => {
+        if (input.type !== "keyDown") return;
+        for (const entry of this.entries.values()) {
+          if (!entry.captureAtWebContents || !entry.parsedBinding) continue;
+          if (!matchesBinding(entry.parsedBinding, input)) continue;
+          event.preventDefault();
+          const focusedWindowId =
+            this.ctx.db.client.readRoot().plugin.kernel.focusedWindowId ??
+            null;
+          void this.dispatch(
+            entry.id,
+            entry.scope,
+            focusedWindowId,
+            null,
+          );
+          return;
+        }
+      };
+
+      const attach = (wc: WebContents) => {
+        if (tracked.has(wc)) return;
+        tracked.add(wc);
+        wc.on("before-input-event", handleInput);
+        wc.once("destroyed", () => tracked.delete(wc));
+      };
+
+      for (const wc of webContents.getAllWebContents()) attach(wc);
+      const onCreated = (_e: Electron.Event, wc: WebContents) => attach(wc);
+      app.on("web-contents-created", onCreated);
+
+      return () => {
+        app.off("web-contents-created", onCreated);
+        for (const wc of tracked) {
+          try {
+            wc.off("before-input-event", handleInput);
+          } catch {}
+        }
+        tracked.clear();
+      };
     });
 
     // Don't clear kyju registry on teardown — dependents re-register during

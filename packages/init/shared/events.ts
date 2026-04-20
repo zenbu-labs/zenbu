@@ -29,7 +29,7 @@ export type ZenbuEvents = {
     exit: { sessionId: string; exitCode: number }
   }
   shortcut: {
-    dispatched: { id: string; scope: string; windowId: string | null; paneId: string | null; ts: number }
+    dispatched: { id: string; scope: string; originScope: string; windowId: string | null; paneId: string | null; ts: number }
   }
   setup: {
     /** A line of stdout/stderr from a setup.ts subprocess, streamed live. */
@@ -56,5 +56,10 @@ export type ZenbuEvents = {
      * ultimately navigates successfully.
      */
     openFileRequested: { filePath: string }
+    /**
+     * Emitted by the `file-viewer.toggleVscode` shortcut handler. Carries the
+     * windowId so each orchestrator ignores toggles aimed at other windows.
+     */
+    vscodeToggleRequested: { windowId: string | null }
   }
 }

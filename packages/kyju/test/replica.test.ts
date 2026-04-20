@@ -26,6 +26,42 @@ describe("replica", () => {
     expect(ctx.clients[1].title.read()).toBe("from client A");
   });
 
+  it("deep mutation via client.update replicates intact to peer replica", async () => {
+    // Simulates the tab-shortcuts plugin scenario: main-process replica writes
+    // a deep nested path via client.update, renderer replica must observe the
+    // same change on its subscribed field.
+    const ctx = await setupMultiClient(2);
+    cleanup = ctx.cleanup;
+
+    await ctx.clients[0].update((root) => {
+      (root as any).windows = [
+        {
+          id: "w1",
+          panes: [
+            { id: "p1", type: "leaf", activeTabId: "tA", tabIds: ["tA", "tB"] },
+          ],
+        },
+      ];
+    });
+
+    // Let the write propagate.
+    await delay(10);
+    expect((ctx.clients[1].readRoot() as any).windows[0].panes[0].activeTabId).toBe("tA");
+
+    // Now: replica 0 (main) does the exact tab-shortcuts mutation pattern.
+    await ctx.clients[0].update((root) => {
+      const ws = (root as any).windows.find((w: any) => w.id === "w1");
+      const pane = ws.panes.find((p: any) => p.id === "p1");
+      pane.activeTabId = "tB";
+    });
+
+    await delay(10);
+
+    // Both replicas should see the change.
+    expect((ctx.clients[0].readRoot() as any).windows[0].panes[0].activeTabId).toBe("tB");
+    expect((ctx.clients[1].readRoot() as any).windows[0].panes[0].activeTabId).toBe("tB");
+  });
+
   it("concurrent root.set — last writer wins, both replicas converge", async () => {
     const ctx = await setupMultiClient(2);
     cleanup = ctx.cleanup;

@@ -160,6 +160,42 @@ describe("client", () => {
     ]);
   });
 
+  it("update via proxy mutation works with TWO levels of nested array-object edits", async () => {
+    const ctx = await setup();
+    cleanup = ctx.cleanup;
+
+    // Seed: windows[] each with panes[] each with activeTabId.
+    // Mirrors the kernel's windowStates[*].panes[*].activeTabId shape.
+    await ctx.client.update((root) => {
+      (root as any).windows = [
+        {
+          id: "w1",
+          panes: [
+            { id: "p1a", activeTabId: "t1" },
+            { id: "p1b", activeTabId: "t2" },
+          ],
+        },
+        {
+          id: "w2",
+          panes: [{ id: "p2a", activeTabId: "t9" }],
+        },
+      ];
+    });
+
+    // The exact access pattern the tab-shortcuts plugin uses.
+    await ctx.client.update((root) => {
+      const ws = (root as any).windows.find((w: any) => w.id === "w1");
+      const pane = ws.panes.find((p: any) => p.id === "p1b");
+      pane.activeTabId = "tNEW";
+    });
+
+    const windows = (ctx.client.readRoot() as any).windows;
+    expect(windows[0].panes[1].activeTabId).toBe("tNEW");
+    // Siblings untouched.
+    expect(windows[0].panes[0].activeTabId).toBe("t1");
+    expect(windows[1].panes[0].activeTabId).toBe("t9");
+  });
+
   it("update via return value replaces root", async () => {
     const ctx = await setup();
     cleanup = ctx.cleanup;

@@ -42,7 +42,10 @@ const windowStateSchema = zod.object({
   sidebarOpen: zod.boolean().default(false),
   tabSidebarOpen: zod.boolean().default(true),
   sidebarPanel: zod.string().default("overview"),
+  persisted: zod.boolean().default(false),
 });
+
+export const MAIN_WINDOW_ID = "main";
 
 export const appSchema = createSchema({
   // Agent package owns shapes (`agentConfigs`, `agents`, `archivedAgents`,

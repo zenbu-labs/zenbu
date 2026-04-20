@@ -19,6 +19,7 @@ export type ShortcutPredicate =
 export interface ShortcutHandlerCtx {
   id: string;
   scope: string;
+  originScope: string;
   windowId: string | null;
   paneId: string | null;
 }

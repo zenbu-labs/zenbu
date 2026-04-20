@@ -7,7 +7,6 @@ import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
   KEY_ENTER_COMMAND,
-  KEY_ESCAPE_COMMAND,
   COMMAND_PRIORITY_HIGH,
   $getRoot,
   $createParagraphNode,
@@ -48,6 +47,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useRpc, useKyjuClient } from "../../../lib/providers";
 import { useDb } from "../../../lib/kyju-react";
+import { useShortcut } from "../../../lib/shortcut-handler";
 import type { ExpectedVisibleMessage } from "../lib/chat-invariants";
 
 type AgentConfigRow = {
@@ -139,41 +139,6 @@ function SubmitPlugin({
       COMMAND_PRIORITY_HIGH,
     );
   }, [editor, onSubmit, menuOpenRef, slashMenuOpenRef, reloadMenuOpenRef]);
-
-  return null;
-}
-
-function InterruptPlugin({ onInterrupt }: { onInterrupt: () => void }) {
-  const [editor] = useLexicalComposerContext();
-
-  useEffect(() => {
-    const unregisterEsc = editor.registerCommand(
-      KEY_ESCAPE_COMMAND,
-      () => {
-        onInterrupt();
-        return true;
-      },
-      COMMAND_PRIORITY_HIGH,
-    );
-
-    const root = editor.getRootElement();
-    if (!root) return unregisterEsc;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "c" && (e.ctrlKey || e.metaKey)) {
-        const selection = window.getSelection();
-        if (selection && selection.toString().length > 0) return;
-        e.preventDefault();
-        onInterrupt();
-      }
-    };
-    root.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      unregisterEsc();
-      root.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [editor, onInterrupt]);
 
   return null;
 }
@@ -514,6 +479,8 @@ export function Composer({
     }
   }, [rpc, agentId, streaming]);
 
+  useShortcut("chat.interrupt", handleInterrupt);
+
   const handleSwitchAgentConfig = useCallback(
     async (newConfigId: string) => {
       await rpc.agent.changeAgentConfig(agentId, newConfigId);
@@ -573,7 +540,6 @@ export function Composer({
           <CtrlNPPlugin />
           <NodeDeletePlugin />
           <RichPastePlugin />
-          {streaming && <InterruptPlugin onInterrupt={handleInterrupt} />}
         </LexicalComposer>
 
         <ReloadMenu

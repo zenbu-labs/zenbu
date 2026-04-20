@@ -720,7 +720,7 @@ export class WindowService extends Service {
             db.client.update((root) => {
               root.plugin.kernel.windowStates = (
                 root.plugin.kernel.windowStates ?? []
-              ).filter((ws) => ws.id !== windowId);
+              ).filter((ws) => ws.id !== windowId || ws.persisted === true);
             }),
           ).catch(() => {});
         };

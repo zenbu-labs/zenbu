@@ -280,6 +280,83 @@ describe("section migrations", () => {
     expect(fs.existsSync(collDir)).toBe(true);
   });
 
+  it("deep client.update into a section replicates correctly", async () => {
+    // Mirrors the tab-shortcuts plugin scenario: a main-process service
+    // inside a sectioned DB mutates a nested array-of-objects via
+    // client.update(root => root.plugin.<name>.array.find(...).nested.find(...).field = ...).
+    const dbPath = tmpDbPath();
+    cleanupPath = dbPath;
+
+    const kernelShape = createSchema({
+      windowStates: f
+        .array(
+          zod.object({
+            id: zod.string(),
+            focusedPaneId: zod.string().nullable(),
+            sessions: zod.array(
+              zod.object({ id: zod.string(), lastViewedAt: zod.number().nullable() }),
+            ),
+            panes: zod.array(
+              zod.object({
+                id: zod.string(),
+                type: zod.enum(["leaf", "split"]),
+                tabIds: zod.array(zod.string()),
+                activeTabId: zod.string().optional(),
+              }),
+            ),
+          }),
+        )
+        .default([]),
+    });
+
+    const { replica } = await openSectionedDb(dbPath, [
+      { name: "kernel", schema: kernelShape, migrations: [] },
+    ]);
+    const client = createClient<SchemaShape>(replica);
+
+    // Seed a windowState shaped like the real kernel root.
+    await client.update((root: any) => {
+      root.plugin.kernel.windowStates = [
+        {
+          id: "win-1",
+          focusedPaneId: "pane-A",
+          sessions: [
+            { id: "s1", lastViewedAt: null },
+            { id: "s2", lastViewedAt: 100 },
+          ],
+          panes: [
+            {
+              id: "pane-A",
+              type: "leaf",
+              tabIds: ["s1", "s2"],
+              activeTabId: "s1",
+            },
+          ],
+        },
+      ];
+    });
+
+    // Exactly the tab-shortcuts handler mutation pattern.
+    await client.update((root: any) => {
+      const ws = root.plugin.kernel.windowStates.find(
+        (w: any) => w.id === "win-1",
+      );
+      const pane = ws.panes.find((p: any) => p.id === "pane-A");
+      pane.activeTabId = "s2";
+      ws.focusedPaneId = pane.id;
+      const now = Date.now();
+      for (const s of ws.sessions) {
+        if (s.id === "s1") s.lastViewedAt = now;
+        if (s.id === "s2") s.lastViewedAt = null;
+      }
+    });
+
+    const root = client.readRoot() as any;
+    expect(root.plugin.kernel.windowStates[0].panes[0].activeTabId).toBe("s2");
+    expect(root.plugin.kernel.windowStates[0].sessions[0].lastViewedAt).not.toBeNull();
+    expect(root.plugin.kernel.windowStates[0].sessions[1].lastViewedAt).toBeNull();
+  });
+
   it("sections do not interfere with each other", async () => {
     const dbPath = tmpDbPath();
     cleanupPath = dbPath;
