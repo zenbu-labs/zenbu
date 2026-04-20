@@ -10,6 +10,12 @@ import type {
 export type UserMessageProps = {
   content: string
   images?: { blobId: string; mimeType: string }[]
+  /**
+   * Captured Lexical state from submit time. When present the read-only
+   * view rehydrates pills from it; the `content` string is still what the
+   * agent received and stays authoritative for anything text-based.
+   */
+  editorState?: unknown
 }
 
 export type AssistantMessageProps = {

@@ -27,6 +27,14 @@ export const agentEventSchema = zod.object({
       kind: zod.literal("user_prompt"),
       text: zod.string(),
       images: zod.array(userPromptImageSchema).optional(),
+      /**
+       * Optional Lexical editor state JSON the composer serialized at submit
+       * time. When present, the read-only user-message view uses it to
+       * rehydrate pills (file refs, images, generic tokens). Plain `text`
+       * is still authoritative for what was sent to the agent; editorState
+       * is purely a display hint.
+       */
+      editorState: zod.any().optional(),
     }),
     zod.object({ kind: zod.literal("session_update"), update: zod.any() }),
     zod.object({ kind: zod.literal("interrupted") }),
@@ -80,6 +88,7 @@ export type AgentEvent = {
         kind: "user_prompt";
         text: string;
         images?: { blobId: string; mimeType: string }[];
+        editorState?: unknown;
       }
     | { kind: "session_update"; update: SessionUpdate }
     | { kind: "interrupted" }

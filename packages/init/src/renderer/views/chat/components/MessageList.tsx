@@ -556,7 +556,13 @@ function MessageRow({
 }) {
   switch (msg.role) {
     case "user":
-      return <C.UserMessage content={msg.content} images={msg.images} />
+      return (
+        <C.UserMessage
+          content={msg.content}
+          images={msg.images}
+          editorState={msg.editorState}
+        />
+      )
     case "assistant":
       return <C.AssistantMessage content={msg.content} />
     case "thinking":

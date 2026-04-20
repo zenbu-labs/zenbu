@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from "react"
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext"
 import { useKyjuClient } from "../../../lib/providers"
+import { migrateLegacyNodesInEditorState } from "../../../../../shared/editor-state"
 
 const DEBOUNCE_MS = 300
 const MAX_STALE_MS = 4000
@@ -21,6 +22,26 @@ function isEditorStateEmpty(state: any): boolean {
     }
   }
   return true
+}
+
+/**
+ * Imperative flush reference exposed for the refocus-rehydrate path.
+ * When the composer loses focus, `RefocusRehydratePlugin` calls `flush()`
+ * on the current plugin instance so the latest local edits are in the
+ * persisted draft before any external writer (e.g. InsertService) touches
+ * it. Once focus returns, rehydrate can safely replace editor state.
+ *
+ * TODO(crdt): The split between "draft is authoritative while blurred"
+ * and "composer is authoritative while focused" exists because we have
+ * no merge protocol for two writers. A CRDT would fold remote ops in
+ * without a handoff.
+ */
+type DraftFlush = { flush: () => void }
+const activeFlushByAgent = new Map<string, DraftFlush>()
+
+export function getDraftFlush(agentId: string): (() => void) | null {
+  const entry = activeFlushByAgent.get(agentId)
+  return entry ? entry.flush : null
 }
 
 export function DraftPersistencePlugin({ agentId }: { agentId: string }) {
@@ -84,6 +105,25 @@ export function DraftPersistencePlugin({ agentId }: { agentId: string }) {
     }
   }, [editor, scheduleSave])
 
+  // Register this plugin's imperative flush so RefocusRehydratePlugin can
+  // force a synchronous persist when the composer blurs. Scope to agentId
+  // because the orchestrator may have multiple composer iframes in flight
+  // during HMR transitions.
+  const flushNow = useCallback(() => {
+    cancelPending()
+    saveDraft()
+  }, [cancelPending, saveDraft])
+
+  useEffect(() => {
+    activeFlushByAgent.set(agentId, { flush: flushNow })
+    return () => {
+      const current = activeFlushByAgent.get(agentId)
+      if (current && current.flush === flushNow) {
+        activeFlushByAgent.delete(agentId)
+      }
+    }
+  }, [agentId, flushNow])
+
   // Flush on unmount if anything is pending
   useEffect(() => {
     return () => {
@@ -104,7 +144,12 @@ export function getInitialEditorState(
   const drafts = client.plugin.kernel.composerDrafts.read() ?? {}
   const draft = drafts[agentId]
   if (!draft?.editorState) return null
-  return JSON.stringify(draft.editorState)
+  // Rewrite any legacy file-reference / image nodes to the generic token
+  // shape on the way in. The next save (debounced) persists the migrated
+  // JSON back, so drafts drift to the new shape without an explicit
+  // migration pass.
+  const migrated = migrateLegacyNodesInEditorState(draft.editorState)
+  return JSON.stringify(migrated)
 }
 
 export function restoreChatBlobs(client: any, agentId: string): void {

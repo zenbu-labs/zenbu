@@ -11,7 +11,12 @@ import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import type { UserMessageProps } from "../../../lib/chat-components";
 import { ImageNode } from "../../../lib/ImageNode";
-import { $deserializeUserMessage } from "../../../lib/deserialize";
+import { FileReferenceNode } from "../../../lib/FileReferenceNode";
+import { TokenNode } from "../../../lib/TokenNode";
+import {
+  $deserializeUserMessage,
+  hasRehydratableEditorState,
+} from "../../../lib/deserialize";
 import { useRpc } from "../../../../../lib/providers";
 
 const MINIMAP =
@@ -25,25 +30,44 @@ function PassthroughErrorBoundary({ children }: { children: React.ReactNode }) {
 function ReadOnlyLexicalMessage({
   content,
   images,
+  editorState,
 }: {
   content: string;
   images: { blobId: string; mimeType: string }[];
+  editorState?: unknown;
 }) {
-  // Stabilize images reference — materializeMessages creates new arrays on every event,
-  // but the values don't change for a given user message.
+  // Stabilize references: materializeMessages rebuilds arrays on every
+  // event but the values for a given past user message are immutable.
   const imagesKey = useMemo(() => JSON.stringify(images), [images]);
   const stableImages = useMemo(() => images, [imagesKey]);
+  const editorStateKey = useMemo(
+    () => (editorState ? JSON.stringify(editorState) : ""),
+    [editorState],
+  );
 
-  const editorConfig = useMemo(
-    () => ({
+  const editorConfig = useMemo(() => {
+    const nodes = [ImageNode, FileReferenceNode, TokenNode];
+    // Prefer the persisted editor-state JSON: it carries every pill's full
+    // payload (color / kind / data) that the flat text can't represent.
+    // Lexical accepts a JSON string in the `editorState` config slot and
+    // rehydrates via each node class's `importJSON`.
+    if (hasRehydratableEditorState(editorState)) {
+      return {
+        namespace: "user-message-readonly",
+        editable: false,
+        nodes,
+        editorState: editorStateKey,
+        onError: (error: Error) => console.error(error),
+      };
+    }
+    return {
       namespace: "user-message-readonly",
       editable: false,
-      nodes: [ImageNode],
+      nodes,
       editorState: () => $deserializeUserMessage(content, stableImages),
       onError: (error: Error) => console.error(error),
-    }),
-    [content, stableImages],
-  );
+    };
+  }, [content, stableImages, editorState, editorStateKey]);
 
   return (
     <LexicalComposer initialConfig={editorConfig}>
@@ -58,14 +82,24 @@ function ReadOnlyLexicalMessage({
   );
 }
 
-export function UserMessage({ content, images }: UserMessageProps) {
+export function UserMessage({
+  content,
+  images,
+  editorState,
+}: UserMessageProps) {
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const [copied, setCopied] = useState(false);
   const innerRef = useRef<HTMLDivElement>(null);
   const rpc = useRpc();
 
-  const hasImages = images && images.length > 0;
+  // Route through the Lexical renderer when there's structured content —
+  // images, a persisted editor state, or a file-reference trailer in the
+  // text (legacy events without editorState still use a file pill).
+  const hasStructuredContent =
+    (images && images.length > 0) ||
+    hasRehydratableEditorState(editorState) ||
+    content.includes("<file_reference ");
 
   useLayoutEffect(() => {
     const el = innerRef.current;
@@ -101,11 +135,17 @@ export function UserMessage({ content, images }: UserMessageProps) {
           <div
             ref={innerRef}
             className={
-              hasImages ? "" : "whitespace-pre-wrap break-words leading-relaxed"
+              hasStructuredContent
+                ? ""
+                : "whitespace-pre-wrap break-words leading-relaxed"
             }
           >
-            {hasImages ? (
-              <ReadOnlyLexicalMessage content={content} images={images} />
+            {hasStructuredContent ? (
+              <ReadOnlyLexicalMessage
+                content={content}
+                images={images ?? []}
+                editorState={editorState}
+              />
             ) : (
               content
             )}

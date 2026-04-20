@@ -1,6 +1,25 @@
+import type { TokenPayload } from "./tokens"
+
 export type ZenbuEvents = {
   advice: {
     reload: { scope: string }
+  }
+  insert: {
+    /**
+     * Emitted by `InsertService.insertToken` when a target session is live
+     * (focused window + focused pane + activeTabId match). The focused
+     * composer's `InsertBridgePlugin` translates this back into the local
+     * token bus so the Lexical insert happens on the correct editor
+     * instance.
+     */
+    requested: {
+      requestId: string
+      windowId: string
+      sessionId: string
+      agentId: string
+      payload: TokenPayload
+      ts: number
+    }
   }
   orchestrator: {
     scrollTouch: { webContentsId: number; phase: "begin" | "end" }

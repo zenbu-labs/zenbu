@@ -61,6 +61,13 @@ export type MaterializedMessage =
       role: "user";
       content: string;
       images?: { blobId: string; mimeType: string }[];
+      /**
+       * Lexical editor state JSON captured at submit time. When present,
+       * the user-message view rehydrates pills (file refs, images, generic
+       * tokens) from this. Optional — older events and ephemeral prompts
+       * fall back to text-only rendering.
+       */
+      editorState?: unknown;
       timeSent?: number;
     })
   | (MessageIdentity & { role: "assistant"; content: string })
@@ -257,6 +264,7 @@ export function materializeMessages(
         role: "user",
         content: event.data.text,
         images: event.data.images,
+        editorState: (event.data as { editorState?: unknown }).editorState,
         timeSent: event.timestamp,
       });
       continue;

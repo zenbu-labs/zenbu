@@ -34,6 +34,61 @@ export function findExistingAgentTab(
 }
 
 /**
+ * Find the agentId for a session anywhere in the window graph. Returns null
+ * if the session doesn't exist. Used by InsertService to resolve persisted
+ * draft keys when a session isn't currently live.
+ */
+export function findAgentIdForSession(
+  windowStates: readonly WindowState[],
+  sessionId: string,
+): string | null {
+  for (const ws of windowStates) {
+    const s = (ws.sessions ?? []).find((ss) => ss.id === sessionId);
+    if (s) return s.agentId;
+  }
+  return null;
+}
+
+/**
+ * Strict "live" check for InsertService: is the session the active tab of
+ * the focused pane of the focused window? Only then is it safe to dispatch
+ * a cross-window insert event without racing local edits in another
+ * composer (which has no merge protocol).
+ *
+ * Why not just "session is active tab anywhere": the orchestrator tracks
+ * activeTabId per-pane independent of focus, so a session can be the
+ * active tab in a backgrounded pane / backgrounded window while the user
+ * is actually typing into a completely different agent's composer in the
+ * focused pane. We want the insert to land wherever the user is *actually*
+ * looking / typing — that's focusedWindowId + focusedPaneId + activeTabId,
+ * not just activeTabId.
+ *
+ * Everything else goes through the persisted draft path, and the composer
+ * picks up the change on refocus via `RefocusRehydratePlugin` (Phase 8b).
+ *
+ * TODO(crdt): With a CRDT on editor state, any mounted composer could
+ * receive the insert and merge it with concurrent local edits. Until then,
+ * we keep exactly one authoritative writer at a time.
+ */
+export function findLiveSessionTab(
+  kernel: Kernel,
+  sessionId: string,
+): { windowId: string; paneId: string } | null {
+  const focusedWindowId = kernel.focusedWindowId;
+  if (!focusedWindowId) return null;
+  const ws = kernel.windowStates.find((w) => w.id === focusedWindowId);
+  if (!ws) return null;
+  const focusedPaneId = ws.focusedPaneId;
+  if (!focusedPaneId) return null;
+  const pane = ws.panes.find((p) => p.id === focusedPaneId);
+  if (!pane) return null;
+  if (pane.activeTabId !== sessionId) return null;
+  const sessionExists = (ws.sessions ?? []).some((s) => s.id === sessionId);
+  if (!sessionExists) return null;
+  return { windowId: ws.id, paneId: pane.id };
+}
+
+/**
  * Mutate `kernel.windowStates` to bring the given session to the front
  * within its window: set the pane's `activeTabId`, mark the pane focused,
  * and clear/set `lastViewedAt` to match the convention

@@ -20,9 +20,9 @@ import {
 } from "@lexical/react/LexicalTypeaheadMenuPlugin";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import {
-  $createFileReferenceNode,
-  $isFileReferenceNode,
-} from "../lib/FileReferenceNode";
+  $createTokenNode,
+  $isTokenNode,
+} from "../lib/TokenNode";
 import { FilePickerMenu } from "../components/FilePickerMenu";
 import { useRpc } from "@/lib/providers";
 import { useDb } from "@/lib/kyju-react";
@@ -144,7 +144,18 @@ export function FilePickerPlugin({
     ) => {
       if (textNode) {
         const entry = option.data;
-        const node = $createFileReferenceNode(entry.path, entry.name, "");
+        // @-mention is a text-replacement op (swap the `@query` TextNode for
+        // a pill), not an "insert at caret". We build the same `kind:"file"`
+        // TokenPayload the bus would, but place it directly since the
+        // typeahead plugin hands us the exact node to replace. The node
+        // class and serialized shape end up identical to a bus-driven
+        // insert.
+        const node = $createTokenNode({
+          kind: "file",
+          title: entry.name,
+          data: { path: entry.path, name: entry.name, content: "" },
+          blobs: [],
+        });
         const nodeKey = node.getKey();
         const spaceNode = $createTextNode(" ");
         textNode.replace(node);
@@ -156,13 +167,13 @@ export function FilePickerPlugin({
           .then((content: string) => {
             editor.update(() => {
               const existing = $getNodeByKey(nodeKey);
-              if ($isFileReferenceNode(existing)) {
-                const updated = $createFileReferenceNode(
-                  entry.path,
-                  entry.name,
-                  content,
-                );
-                existing.replace(updated);
+              if ($isTokenNode(existing)) {
+                existing.setPayload({
+                  kind: "file",
+                  title: entry.name,
+                  data: { path: entry.path, name: entry.name, content },
+                  blobs: [],
+                });
               }
             });
           })

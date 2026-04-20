@@ -15,6 +15,7 @@ import {
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { FileReferenceNode } from "../lib/FileReferenceNode";
 import { ImageNode } from "../lib/ImageNode";
+import { TokenNode } from "../lib/TokenNode";
 import { FilePickerPlugin } from "../plugins/FilePickerPlugin";
 import { ImagePastePlugin } from "../plugins/ImagePastePlugin";
 import {
@@ -26,6 +27,9 @@ import { SlashCommandPlugin } from "../commands/SlashCommandPlugin";
 import { ReloadMenu } from "../commands/ReloadMenu";
 import { CtrlNPPlugin, NodeDeletePlugin } from "../plugins/KeyboardPlugins";
 import { RichPastePlugin } from "../plugins/RichPastePlugin";
+import { TokenInsertPlugin } from "../plugins/TokenInsertPlugin";
+import { InsertBridgePlugin } from "../plugins/InsertBridgePlugin";
+import { RefocusRehydratePlugin } from "../plugins/RefocusRehydratePlugin";
 import { serializeEditorContent, type CollectedImage } from "../lib/serialize";
 import { Button } from "@/components/ui/button";
 import {
@@ -92,7 +96,11 @@ function SubmitPlugin({
   slashMenuOpenRef,
   reloadMenuOpenRef,
 }: {
-  onSubmit: (text: string, images: CollectedImage[]) => void;
+  onSubmit: (
+    text: string,
+    images: CollectedImage[],
+    editorStateJson: unknown,
+  ) => void;
   menuOpenRef: React.RefObject<boolean>;
   slashMenuOpenRef: React.RefObject<boolean>;
   reloadMenuOpenRef: React.RefObject<boolean>;
@@ -111,10 +119,14 @@ function SubmitPlugin({
         )
           return false;
         event?.preventDefault();
+        // Snapshot the editor state JSON alongside the serialized text +
+        // images so the user-message view can rehydrate pills — the raw
+        // `text` alone is lossy (placeholders drop color/kind/data).
+        const editorStateJson = editor.getEditorState().toJSON();
         editor.getEditorState().read(() => {
           const { text, images } = serializeEditorContent();
           if (text || images.length > 0) {
-            onSubmit(text, images);
+            onSubmit(text, images, editorStateJson);
             editor.update(() => {
               const root = $getRoot();
               root.clear();
@@ -197,7 +209,7 @@ function makeEditorConfig(initialState: string | null) {
   return {
     namespace: "composer",
     onError: (error: Error) => console.error(error),
-    nodes: [FileReferenceNode, ImageNode],
+    nodes: [FileReferenceNode, ImageNode, TokenNode],
     ...(initialState ? { editorState: initialState } : {}),
   };
 }
@@ -398,7 +410,11 @@ export function Composer({
   }, [agentId, client]);
 
   const handleSubmit = useCallback(
-    async (text: string, images: CollectedImage[]) => {
+    async (
+      text: string,
+      images: CollectedImage[],
+      editorStateJson: unknown,
+    ) => {
       // Clear draft for this agent
       const drafts = client.plugin.kernel.composerDrafts.read() ?? {};
       if (drafts[agentId]) {
@@ -434,9 +450,11 @@ export function Composer({
           kind: "user_prompt";
           text: string;
           images?: { blobId: string; mimeType: string }[];
+          editorState?: unknown;
         } = {
           kind: "user_prompt",
           text,
+          editorState: editorStateJson,
         };
         if (images.length > 0) {
           eventData.images = images.map((img) => ({
@@ -538,8 +556,11 @@ export function Composer({
           />
           <AutoFocusPlugin />
           <FilePickerPlugin menuOpenRef={filePickerOpenRef} agentId={agentId} />
-          <ImagePastePlugin />
+          <ImagePastePlugin agentId={agentId} />
+          <TokenInsertPlugin agentId={agentId} />
+          <InsertBridgePlugin agentId={agentId} />
           <DraftPersistencePlugin agentId={agentId} />
+          <RefocusRehydratePlugin agentId={agentId} />
           <SlashCommandPlugin
             menuOpenRef={slashMenuOpenRef}
             agentId={agentId}
