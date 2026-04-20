@@ -1,4 +1,6 @@
-<img src="./docs/logo.png" alt="Zenbu" width="72" />
+<p align="center">
+  <img src="./docs/logo.png" alt="Zenbu" width="180" />
+</p>
 
 # Zenbu
 
@@ -6,13 +8,15 @@
 
 The extensible coding agent GUI.
 
-![Zenbu](./docs/screenshot.webp)
+<p align="center">
+  <img src="./docs/screenshot.webp" alt="Zenbu" />
+</p>
 
 ## Installation
 
-Download the latest build from [zenbu.dev](https://zenbu.dev) or [GitHub Releases](https://github.com/zenbu-labs/zenbu/releases). Open the app and it sets itself up under `~/.zenbu/` on first launch.
+Download the latest build from [zenbu.dev/download](https://www.zenbu.dev/download) or [GitHub Releases](https://github.com/zenbu-labs/zenbu/releases). Open the app and it sets itself up under `~/.zenbu/` on first launch.
 
-## Agents
+## Configuring agents
 
 Zenbu ships with **codex**, **claude**, **cursor**, **opencode**, and **copilot** preinstalled. It assumes you've already authenticated whichever one you want to use through its own CLI. You can add more agents (that are [acp compatible](https://agentclientprotocol.com/get-started/registry)) inside Zenbu Settings.
 
