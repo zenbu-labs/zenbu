@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./docs/logo.png" alt="Zenbu" width="60" />
+  <img src="./assets/logo.png" alt="Zenbu" width="100" />
 </p>
 
 <h1 align="center">Zenbu</h1>
@@ -12,7 +12,7 @@
 
 
 <p align="center">
-  <img src="./docs/screenshot.webp" width="640" style="background: transparent;" />
+  <img src="./assets/screenshot.webp" width="640" style="background: transparent;" />
 </p>
 
 ## Installation
