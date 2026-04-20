@@ -1,12 +1,17 @@
-<img src="./docs/logo.png" alt="Zenbu" width="72" />
+<p align="center">
+  <img src="./docs/logo.png" alt="Zenbu" width="48" />
+</p>
 
-# Zenbu
+<h1 align="center">Zenbu</h1>
 
-![status: beta](https://img.shields.io/badge/status-beta-orange)
+<p align="center">
+  <img alt="status: beta" src="https://img.shields.io/badge/status-beta-orange"><br>
+  The extensible coding agent GUI.
+</p>
 
-The extensible coding agent GUI.
-
-![Zenbu](./docs/screenshot.webp)
+<p align="center">
+  <img src="./docs/screenshot.webp" alt="Zenbu Screenshot" />
+</p>
 
 ## Installation
 
