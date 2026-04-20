@@ -9,8 +9,6 @@
   The extensible coding agent GUI
 </p>
 
-
-
 <p align="center">
   <img src="./assets/screenshot.webp" width="640" style="background: transparent;" />
 </p>
@@ -51,7 +49,7 @@ zen link                # regenerate registry types after editing a service or s
 
 ### Inspect the database
 
-Zenbu's state lives in a local reactive database named kyju, query it via the `zen` cli:
+Zenbu's state lives in a local reactive database named [kyju](https://github.com/zenbu-labs/zenbu/tree/main/packages/kyju), query it via the `zen` cli:
 
 ```bash
 zen kyju db root                # full root document
