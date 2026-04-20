@@ -30,6 +30,30 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
+export function ChangeCwdItem({
+  agentId,
+}: {
+  agentId: string;
+  currentCwd: string;
+}) {
+  const rpc = useRpc();
+  const onClick = useCallback(async () => {
+    const dir = await rpc.window.pickDirectory();
+    if (!dir) return;
+    try {
+      await rpc.agent.changeCwd(agentId, dir);
+    } catch (err) {
+      console.error("[cwd-selector] changeCwd failed", err);
+    }
+  }, [rpc, agentId]);
+  return (
+    <DropdownMenuItem className="text-xs" onClick={onClick}>
+      <FolderSyncIcon className="size-3" />
+      Change cwd
+    </DropdownMenuItem>
+  );
+}
+
 function ModeCombobox({
   options,
   currentValue,
@@ -210,16 +234,6 @@ export function ComposerToolbar({ agentId }: { agentId: string }) {
   const availableModes = template?.availableModes ?? [];
   const currentMode = agent?.mode ?? "";
 
-  const handlePickCwd = useCallback(async () => {
-    const dir = await rpc.window.pickDirectory();
-    if (!dir) return;
-    try {
-      await rpc.agent.changeCwd(agentId, dir);
-    } catch (err) {
-      console.error("[cwd-selector] changeCwd failed", err);
-    }
-  }, [rpc, agentId]);
-
   const handleModeChange = useCallback(
     async (value: string) => {
       await rpc.agent.setConfigOption(agentId, "mode", value);
@@ -266,10 +280,7 @@ export function ComposerToolbar({ agentId }: { agentId: string }) {
               <FolderOpenIcon className="size-3" />
               Open in Finder
             </DropdownMenuItem>
-            <DropdownMenuItem className="text-xs" onClick={handlePickCwd}>
-              <FolderSyncIcon className="size-3" />
-              Change cwd
-            </DropdownMenuItem>
+            <ChangeCwdItem agentId={agentId} currentCwd={agentCwd!} />
           </DropdownMenuContent>
         </DropdownMenu>
       ) : (
