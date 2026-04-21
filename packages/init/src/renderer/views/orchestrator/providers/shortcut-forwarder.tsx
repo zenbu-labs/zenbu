@@ -77,18 +77,24 @@ export function ShortcutForwarderProvider({
 }) {
   const rpc = useRpc();
 
-  const registry = (useDb((root: any) => root.plugin.kernel.shortcutRegistry) ??
-    []) as { id: string; defaultBinding: string; description: string; scope: string }[];
-  const overrides = (useDb(
-    (root: any) => root.plugin.kernel.shortcutOverrides,
-  ) ?? {}) as Record<string, string>;
-  const disabled = (useDb(
-    (root: any) => root.plugin.kernel.shortcutDisabled,
-  ) ?? []) as string[];
+  const registry = useDb((root) => root.plugin.kernel.shortcutRegistry)
+  const overrides = useDb(
+    (root) => root.plugin.kernel.shortcutOverrides,
+  ) ;
+  const disabled = useDb(
+    (root) => root.plugin.kernel.shortcutDisabled,
+  )
+
+  // Pass the live DB root into the matcher so `when` clauses can be
+  // evaluated on each keystroke. Held via a ref so we don't need to
+  // re-register keydown listeners on every DB write.
+  const dbRoot = useDb();
+  const dbRootRef = useRef(dbRoot);
+  dbRootRef.current = dbRoot;
 
   const windowStates = useDb(
-    (root: any) => root.plugin.kernel.windowStates,
-  ) as Array<{ id: string; focusedPaneId?: string | null }> | undefined;
+    (root) => root.plugin.kernel.windowStates,
+  )
   const focusedPaneId =
     windowStates?.find((ws) => ws.id === windowId)?.focusedPaneId ?? null;
   const focusedPaneIdRef = useRef(focusedPaneId);
@@ -163,7 +169,7 @@ export function ShortcutForwarderProvider({
       console.log(
         `[shortcut-forwarder] match "${binding.id}" scope=${binding.scope} paneId=${paneId}`,
       );
-      void (rpc as any).shortcut
+      void (rpc ).shortcut
         .dispatch(binding.id, binding.scope, windowId, paneId)
         .catch((err: unknown) => {
           console.error(`[shortcut-forwarder] dispatch failed:`, err);
@@ -175,10 +181,28 @@ export function ShortcutForwarderProvider({
   // Orchestrator-native keydown capture.
   useEffect(() => {
     const onKeydown = (e: KeyboardEvent) => {
-      if (captureLocksRef.current > 0) return;
+      if (captureLocksRef.current > 0) {
+        if (comboFromEvent(e) === "cmd+o") {
+          console.log(
+            "[spaces-debug][forwarder] cmd+o (local) DROPPED — captureLock active",
+          );
+        }
+        return;
+      }
       const combo = comboFromEvent(e);
       if (!combo) return;
-      const result = matcherRef.current.processCombo(combo, resolvedRef.current);
+      const result = matcherRef.current.processCombo(
+        combo,
+        resolvedRef.current,
+        dbRootRef.current,
+      );
+      if (combo === "cmd+o") {
+        console.log(
+          `[spaces-debug][forwarder] cmd+o (local) matcher result=${result.kind}${
+            result.kind === "match" ? ` id=${result.binding.id}` : ""
+          }`,
+        );
+      }
       if (result.kind === "match") {
         e.preventDefault();
         e.stopPropagation();
@@ -205,15 +229,35 @@ export function ShortcutForwarderProvider({
       const data = e.data;
       if (!data || typeof data !== "object") return;
       if (data.type !== "zenbu-shortcut:keydown") return;
-      if (captureLocksRef.current > 0) return;
 
       const combo = data.combo as string;
+      if (combo === "cmd+o") {
+        console.log(
+          `[spaces-debug][forwarder] cmd+o (iframe scope=${data.scope}) received`,
+        );
+      }
+
+      if (captureLocksRef.current > 0) {
+        if (combo === "cmd+o") {
+          console.log(
+            "[spaces-debug][forwarder] cmd+o (iframe) DROPPED — captureLock active",
+          );
+        }
+        return;
+      }
       if (!combo) return;
 
       const result = matcherRef.current.processCombo(
         combo,
         resolvedRef.current,
       );
+      if (combo === "cmd+o") {
+        console.log(
+          `[spaces-debug][forwarder] cmd+o (iframe) matcher result=${result.kind}${
+            result.kind === "match" ? ` id=${result.binding.id}` : ""
+          }`,
+        );
+      }
 
       if (result.kind === "match") {
         broadcastArmed(false);

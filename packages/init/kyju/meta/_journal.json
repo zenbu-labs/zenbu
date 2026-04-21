@@ -150,6 +150,11 @@
       "idx": 29,
       "tag": "window_persisted_flag",
       "when": 1776657697352
+    },
+    {
+      "idx": 30,
+      "tag": "add_shortcut_when",
+      "when": 1776745190040
     }
   ]
 }

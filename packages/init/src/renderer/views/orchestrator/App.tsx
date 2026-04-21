@@ -751,7 +751,7 @@ function OrchestratorContent() {
           const now = Date.now();
           for (const s of ws.sessions) {
             if (s.id === oldActiveTabId) s.lastViewedAt = now;
-            if (s.id === tabId) s.lastViewedAt = null;
+            if (s.id === tabId) s.lastViewedAt = now;
           }
         });
       }
@@ -898,7 +898,7 @@ function OrchestratorContent() {
     <div
       ref={rootFocusRef}
       tabIndex={-1}
-      className="flex h-full flex-col bg-[#F4F4F4] outline-none"
+      className="flex h-full flex-col bg-transparent outline-none"
     >
       <SettingsDialog
         open={settingsOpen}

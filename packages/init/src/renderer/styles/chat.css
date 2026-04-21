@@ -1,5 +1,25 @@
 /* Shared chat view styles - used by both orchestrator and standalone chat view */
 
+/* Tab strip streaming indicator (shared by `PaneTab`). */
+@keyframes tab-sweep {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  10% { opacity: 1; }
+  40% { opacity: 1; }
+  50% {
+    transform: translateX(350%);
+    opacity: 0;
+  }
+  60% { opacity: 1; }
+  90% { opacity: 1; }
+  100% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

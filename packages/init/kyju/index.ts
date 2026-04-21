@@ -28,5 +28,6 @@ import m26 from "./0026_agents_hot_archive"
 import m27 from "./0027_agent_default_configuration"
 import m28 from "./0028_add_acp_agents"
 import m29 from "./0029_window_persisted_flag"
+import m30 from "./0030_add_shortcut_when"
 
-export const migrations = [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29]
+export const migrations = [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, m16, m17, m18, m19, m20, m21, m22, m23, m24, m25, m26, m27, m28, m29, m30]

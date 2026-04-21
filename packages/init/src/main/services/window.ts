@@ -652,7 +652,7 @@ export class WindowService extends Service {
           },
         });
 
-        view.setBackgroundColor("#F4F4F4");
+        view.setBackgroundColor("#00000000");
         win.contentView.addChildView(view);
 
         const layout = () => {

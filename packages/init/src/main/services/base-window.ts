@@ -37,12 +37,16 @@ export class BaseWindowService extends Service {
       ...(opts?.x != null && opts?.y != null
         ? { x: opts.x, y: opts.y }
         : {}),
-        // 
+        //
       show: opts?.show ?? true,
       titleBarStyle: "hidden",
       trafficLightPosition: { x: 12, y: 10 },
-      backgroundColor: "#F4F4F4",
-      // 
+      transparent: true,
+      vibrancy: "under-window",
+      visualEffectState: "active",
+      backgroundColor: "#00000000",
+      hasShadow: true,
+      //
     })
     this.windows.set(windowId, win)
     win.on("closed", () => this.windows.delete(windowId))

@@ -22,6 +22,11 @@ const KERNEL_MANIFEST = "packages/init/zenbu.plugin.json";
 //
 // Also captures `uncaughtException` / `unhandledRejection` so a crashed
 // renderer / main-process exception is recoverable from the log.
+
+/**
+ * 
+ * ah why are we doing this in the shell
+ */
 (() => {
   try {
     const internalDir = path.join(os.homedir(), ".zenbu", ".internal");
@@ -303,7 +308,9 @@ app.whenReady().then(async () => {
     });
 
     let shutdownState: "idle" | "running" | "ready" = "idle";
-
+/**
+ * this needs to be moved out of the hsell
+ */
     app.on("before-quit", (e) => {
       // Two-phase quit:
       //   1. First event: state=idle. We `preventDefault()` to stop

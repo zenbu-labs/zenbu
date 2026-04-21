@@ -31,6 +31,15 @@ export interface ShortcutDefinition {
    * off unless the shortcut needs to beat a non-zenbu webContents.
    */
   captureAtWebContents?: boolean;
+  /**
+   * Optional activation clause, VSCode-style. Simple DB-path expression
+   * evaluated live against the reactive root on each keystroke. Truthy =
+   * shortcut participates in matching; falsy = skipped. Optionally prefixed
+   * with `!` for negation. Example: `"plugin.spaces.overlayActive"`.
+   * When multiple shortcuts share a combo, one with a `when` beats one
+   * without (specificity).
+   */
+  when?: string;
 }
 
 export interface DispatchContext {
@@ -64,6 +73,7 @@ interface ShortcutEntry {
   handler?: (ctx: DispatchContext) => void | Promise<void>;
   captureAtWebContents: boolean;
   parsedBinding: ParsedBinding | null;
+  when?: string;
 }
 
 function parseBinding(binding: string): ParsedBinding {
@@ -124,6 +134,7 @@ export class ShortcutService extends Service {
       parsedBinding: captureAtWebContents
         ? parseBinding(def.defaultBinding)
         : null,
+      when: def.when,
     };
     this.entries.set(def.id, entry);
     void this.syncRegistryToDb();
@@ -338,6 +349,7 @@ export class ShortcutService extends Service {
       defaultBinding: e.defaultBinding,
       description: e.description,
       scope: e.scope,
+      ...(e.when ? { when: e.when } : {}),
     }));
     await Effect.runPromise(
       client.update((root) => {

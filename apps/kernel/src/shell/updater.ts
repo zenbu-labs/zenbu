@@ -18,7 +18,7 @@ export function initUpdater(): void {
   autoUpdater.on("update-available", (info) => console.log("[updater] available:", info.version))
   autoUpdater.on("update-not-available", () => console.log("[updater] up to date"))
   autoUpdater.on("download-progress", (p) =>
-    console.log(`[updater] ${p.percent.toFixed(1)}% (${(p.bytesPerSecond / 1024 / 1024).toFixed(2)} MB/s)`),
+    console.log(`[updater] ${p.percent.toFixed(1)}% kkk(${(p.bytesPerSecond / 1024 / 1024).toFixed(2)} MB/s)`),
   )
   autoUpdater.on("update-downloaded", (info) =>
     console.log("[updater] downloaded:", info.version, "— will install on next quit"),

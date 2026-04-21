@@ -5,6 +5,8 @@ export interface ResolvedBinding {
   scope: string;
   /** Canonicalized combos that make up this chord. */
   chord: string[];
+  /** Optional activation clause (DB dot-path, optionally `!`-negated). */
+  when?: string;
 }
 
 export type MatchResult =
@@ -13,7 +15,12 @@ export type MatchResult =
   | { kind: "match"; binding: ResolvedBinding };
 
 export function buildResolvedBindings(
-  registry: { id: string; defaultBinding: string; scope: string }[],
+  registry: {
+    id: string
+    defaultBinding: string
+    scope: string
+    when?: string
+  }[],
   overrides: Record<string, string>,
   disabled: string[],
 ): ResolvedBinding[] {
@@ -24,9 +31,38 @@ export function buildResolvedBindings(
     const raw = overrides[entry.id] ?? entry.defaultBinding;
     const chord = parseBinding(raw);
     if (chord.length === 0) continue;
-    result.push({ id: entry.id, scope: entry.scope, chord });
+    result.push({
+      id: entry.id,
+      scope: entry.scope,
+      chord,
+      when: entry.when,
+    });
   }
   return result;
+}
+
+/**
+ * Evaluate a `when` clause against a DB root. Supports dot-paths and a
+ * single optional `!` negation prefix. Missing paths and undefined values
+ * are falsy. No `when` means "always active" → returns true.
+ */
+export function evalWhen(when: string | undefined, root: unknown): boolean {
+  if (!when) return true;
+  const trimmed = when.trim();
+  const negated = trimmed.startsWith("!");
+  const path = (negated ? trimmed.slice(1) : trimmed).trim();
+  if (!path) return true;
+  const parts = path.split(".");
+  let cur: any = root;
+  for (const p of parts) {
+    if (cur == null) {
+      cur = undefined;
+      break;
+    }
+    cur = cur[p];
+  }
+  const truthy = Boolean(cur);
+  return negated ? !truthy : truthy;
 }
 
 /** Set of all combos that begin any chord — for synchronous preventDefault in iframes. */
@@ -64,19 +100,33 @@ export class ChordMatcher {
    *  - `{ kind: "prefix" }` if it's a valid partial prefix of at least one binding (chord is armed)
    *  - `{ kind: "none" }` otherwise (matcher resets, caller may let the stroke bubble)
    */
-  processCombo(combo: string, resolved: ResolvedBinding[]): MatchResult {
+  processCombo(
+    combo: string,
+    resolved: ResolvedBinding[],
+    dbRoot?: unknown,
+  ): MatchResult {
     this.armed.push(combo);
     const current = this.armed.join(" ");
 
+    // Collect every chord match and pick by specificity: a binding with a
+    // truthy `when` clause beats one without (VSCode semantics). Bindings
+    // with `when` clauses that evaluate falsy are excluded entirely.
+    const allMatches: ResolvedBinding[] = [];
     for (const r of resolved) {
-      if (r.chord.join(" ") === current) {
-        this.reset();
-        return { kind: "match", binding: r };
-      }
+      if (r.chord.join(" ") !== current) continue;
+      if (r.when !== undefined && !evalWhen(r.when, dbRoot)) continue;
+      allMatches.push(r);
+    }
+    if (allMatches.length > 0) {
+      const withWhen = allMatches.find((m) => m.when !== undefined);
+      const chosen = withWhen ?? allMatches[0];
+      this.reset();
+      return { kind: "match", binding: chosen };
     }
 
     const hasPrefix = resolved.some((r) => {
       if (r.chord.length <= this.armed.length) return false;
+      if (r.when !== undefined && !evalWhen(r.when, dbRoot)) return false;
       for (let i = 0; i < this.armed.length; i++) {
         if (r.chord[i] !== this.armed[i]) return false;
       }

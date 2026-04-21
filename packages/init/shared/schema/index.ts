@@ -203,6 +203,13 @@ export const appSchema = createSchema({
         defaultBinding: zod.string(),
         description: zod.string(),
         scope: zod.string(),
+        // Optional DB-path expression evaluated live against the reactive
+        // root (e.g. `"plugin.spaces.overlayActive"`, or `"!..."`). If
+        // present, the shortcut only participates in matching while the
+        // expression is truthy. When multiple shortcuts match the same
+        // combo, one with a `when` clause beats one without — VSCode-style
+        // specificity.
+        when: zod.string().optional(),
       }),
     )
     .default([]),

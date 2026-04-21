@@ -103,6 +103,14 @@ if (!IS_TOP_FRAME) {
       event.stopPropagation();
     }
 
+    if (combo === "cmd+o") {
+      console.log(
+        `[spaces-debug][capture scope=${SCOPE}] cmd+o keydown — swallow=${swallow} armed=${armed} exactHas=${exactBindings.has(
+          combo,
+        )}`,
+      );
+    }
+
     const msg: KeydownMessage = {
       type: "zenbu-shortcut:keydown",
       scope: SCOPE,
@@ -118,7 +126,19 @@ if (!IS_TOP_FRAME) {
 
     try {
       window.parent.postMessage(msg, "*");
-    } catch {}
+      if (combo === "cmd+o") {
+        console.log(
+          `[spaces-debug][capture scope=${SCOPE}] cmd+o forwarded to parent`,
+        );
+      }
+    } catch (err) {
+      if (combo === "cmd+o") {
+        console.error(
+          `[spaces-debug][capture scope=${SCOPE}] cmd+o postMessage FAILED:`,
+          err,
+        );
+      }
+    }
   };
 
   window.addEventListener("keydown", onKeydown, true);
