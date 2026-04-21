@@ -127,6 +127,7 @@ export const appSchema = createSchema({
         meta: zod
           .object({
             kind: zod.string().optional(),
+            sidebar: zod.boolean().optional(),
           })
           .optional(),
       }),

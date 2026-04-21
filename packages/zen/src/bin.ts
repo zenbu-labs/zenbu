@@ -11,6 +11,7 @@ import { runConfig } from "./commands/config"
 import { runSetup } from "./commands/setup"
 import { runInit } from "./commands/init"
 import { runExec } from "./commands/exec"
+import { runBrowser } from "./commands/browser"
 
 const SUBCOMMANDS = new Set([
   "kyju",
@@ -20,6 +21,7 @@ const SUBCOMMANDS = new Set([
   "setup",
   "init",
   "exec",
+  "browser",
   "help",
   "--help",
   "-h",
@@ -38,6 +40,7 @@ Usage:
   zen config <get|set> <key> [value]             Read/write CLI config
   zen init <plugin-name> [--dir <path>]          Scaffold a new plugin
   zen exec -e '<ts>' | zen exec <file.ts>        Run TS with rpc/events pre-opened
+  zen browser <sub> [...]                        Drive the browser plugin (list / tabs / screenshot / navigate / cdp)
 `)
 }
 
@@ -77,6 +80,9 @@ async function main() {
       return
     case "exec":
       await runExec(rest)
+      return
+    case "browser":
+      await runBrowser(rest)
       return
     case "help":
     case "--help":

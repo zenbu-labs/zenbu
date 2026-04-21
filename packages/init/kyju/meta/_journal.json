@@ -155,6 +155,11 @@
       "idx": 30,
       "tag": "add_shortcut_when",
       "when": 1776745190040
+    },
+    {
+      "idx": 31,
+      "tag": "migration",
+      "when": 1776753051861
     }
   ]
 }

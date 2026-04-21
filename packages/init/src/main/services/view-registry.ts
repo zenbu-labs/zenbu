@@ -26,7 +26,7 @@ export class ViewRegistryService extends Service {
     scope: string,
     root: string,
     configFile?: string | false,
-    meta?: { kind?: string },
+    meta?: { kind?: string; sidebar?: boolean },
   ): Promise<ViewEntry> {
     const existing = this.views.get(scope);
     if (existing) return existing;
@@ -53,7 +53,7 @@ export class ViewRegistryService extends Service {
     scope: string,
     reloaderId: string,
     pathPrefix: string,
-    meta?: { kind?: string },
+    meta?: { kind?: string; sidebar?: boolean },
   ): ViewEntry {
     const existing = this.views.get(scope);
     if (existing) return existing;

@@ -576,6 +576,31 @@ export class WindowService extends Service {
     }
   }
 
+  // `y: 36` matches `LAYOUT.TITLE_BAR_OVERLAP` in
+  // `plugins/spaces/src/replacements/layout.ts` — the kernel's custom title
+  // bar is 36 logical px tall and we drop it so the snapshot matches the
+  // iframe content area (what the mirror used to render).
+  async captureWindowSnapshot(opts: {
+    windowId: string;
+  }): Promise<string | null> {
+    const entry = this.views.get(opts.windowId);
+    if (!entry) return null;
+    try {
+      const { width, height } = entry.view.getBounds();
+      if (width <= 0 || height <= 36) return null;
+      const image = await entry.view.webContents.capturePage({
+        x: 0,
+        y: 36,
+        width,
+        height: height - 36,
+      });
+      return image.toDataURL();
+    } catch (err) {
+      console.error("[window] captureWindowSnapshot failed:", err);
+      return null;
+    }
+  }
+
   async openInFinder(dirPath: string) {
     await shell.openPath(dirPath);
   }
