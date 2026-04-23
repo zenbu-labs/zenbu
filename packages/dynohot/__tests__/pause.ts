@@ -85,7 +85,7 @@ await test("pause registry is shared via globalThis Symbol.for", () => {
 	);
 });
 
-await test("registerWatcherClosable + closeAllWatchers", () => {
+await test("registerWatcherClosable + closeAllWatchers", async () => {
 	clearGlobals();
 	let aClosed = 0;
 	let bClosed = 0;
@@ -93,25 +93,25 @@ await test("registerWatcherClosable + closeAllWatchers", () => {
 	const b = { close: () => { bClosed++; } };
 	registerWatcherClosable(a);
 	registerWatcherClosable(b);
-	closeAllWatchers();
+	await closeAllWatchers();
 	assert.equal(aClosed, 1);
 	assert.equal(bClosed, 1);
-	closeAllWatchers(); // set was cleared, second call is a no-op
+	await closeAllWatchers(); // set was cleared, second call is a no-op
 	assert.equal(aClosed, 1);
 	assert.equal(bClosed, 1);
 });
 
-await test("registerWatcherClosable returns a deregister fn", () => {
+await test("registerWatcherClosable returns a deregister fn", async () => {
 	clearGlobals();
 	let closed = 0;
 	const watcher = { close: () => { closed++; } };
 	const dereg = registerWatcherClosable(watcher);
 	dereg();
-	closeAllWatchers();
+	await closeAllWatchers();
 	assert.equal(closed, 0, "deregistered watchers must not be closed");
 });
 
-await test("closeAllWatchers swallows individual close throws", () => {
+await test("closeAllWatchers swallows individual close throws", async () => {
 	clearGlobals();
 	let aClosed = 0;
 	let cClosed = 0;
@@ -121,13 +121,12 @@ await test("closeAllWatchers swallows individual close throws", () => {
 	registerWatcherClosable(a);
 	registerWatcherClosable(b);
 	registerWatcherClosable(c);
-	// Must not throw, must close both `a` and `c` despite `b` failing.
-	closeAllWatchers();
+	await closeAllWatchers();
 	assert.equal(aClosed, 1);
 	assert.equal(cClosed, 1);
 });
 
-await test("closables registry is shared via globalThis Symbol.for", () => {
+await test("closables registry is shared via globalThis Symbol.for", async () => {
 	clearGlobals();
 	const watcher = { close: () => {} };
 	registerWatcherClosable(watcher);
@@ -136,5 +135,5 @@ await test("closables registry is shared via globalThis Symbol.for", () => {
 		| undefined;
 	assert.ok(set instanceof Set, "global closable set must be present");
 	assert.ok(set.has(watcher));
-	closeAllWatchers();
+	await closeAllWatchers();
 });

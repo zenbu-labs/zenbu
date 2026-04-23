@@ -9,7 +9,7 @@ import type { KyjuError, EffectFieldNode, FieldNode } from "@zenbu/kyju";
 import type * as Effect from "effect/Effect";
 import { createRouter, dbStringify, dbParse } from "@zenbu/kyju/transport";
 import type { DbRoot } from "#registry/db-sections";
-// 
+//
 import { Service, runtime } from "../runtime";
 import { trace as traceSpan } from "../../../shared/tracer";
 import { HttpService } from "./http";
@@ -101,9 +101,14 @@ function parseJsonc(str: string): unknown {
     if (str[i] === '"') {
       let j = i + 1;
       while (j < str.length) {
-        if (str[j] === "\\") { j += 2; }
-        else if (str[j] === '"') { j++; break; }
-        else { j++; }
+        if (str[j] === "\\") {
+          j += 2;
+        } else if (str[j] === '"') {
+          j++;
+          break;
+        } else {
+          j++;
+        }
       }
       result += str.slice(i, j);
       i = j;
@@ -213,8 +218,7 @@ export async function discoverSections(
                 const m0 = Date.now();
                 const migrationsPath = await traceSpan(
                   "discover:resolve-migrations",
-                  () =>
-                    resolveManifestModulePath(baseDir, manifest.migrations),
+                  () => resolveManifestModulePath(baseDir, manifest.migrations),
                   { parentKey: "db", meta: { plugin: pluginName } },
                 );
                 resolveMigrationsMs = Date.now() - m0;
@@ -258,12 +262,11 @@ export async function discoverSections(
           return null;
         }
 
-        const migrations =
-          migrationsResult.migModule
-            ? migrationsResult.migModule.migrations ??
-              migrationsResult.migModule.default ??
-              []
-            : [];
+        const migrations = migrationsResult.migModule
+          ? migrationsResult.migModule.migrations ??
+            migrationsResult.migModule.default ??
+            []
+          : [];
 
         return { name: manifest.name, schema, migrations };
       } catch (error) {
@@ -295,19 +298,35 @@ export async function discoverSections(
   );
 
   const sorted = [...perPluginTimings].sort((a, b) => b.totalMs - a.totalMs);
-  const sum = (k: keyof typeof perPluginTimings[number]) =>
+  const sum = (k: keyof (typeof perPluginTimings)[number]) =>
     perPluginTimings.reduce((acc, p) => acc + (p[k] as number), 0);
   console.log("[db.discover] per-plugin breakdown (ms, parallel):");
   console.log(
-    `  ${"plugin".padEnd(28)} ${"total".padStart(6)} ${"man".padStart(5)} ${"resS".padStart(5)} ${"impS".padStart(6)} ${"resM".padStart(5)} ${"impM".padStart(6)}`,
+    `  ${"plugin".padEnd(28)} ${"total".padStart(6)} ${"man".padStart(
+      5,
+    )} ${"resS".padStart(5)} ${"impS".padStart(6)} ${"resM".padStart(
+      5,
+    )} ${"impM".padStart(6)}`,
   );
   for (const p of sorted) {
     console.log(
-      `  ${p.name.padEnd(28)} ${String(p.totalMs).padStart(6)} ${String(p.manifestMs).padStart(5)} ${String(p.resolveSchemaMs).padStart(5)} ${String(p.importSchemaMs).padStart(6)} ${String(p.resolveMigrationsMs).padStart(5)} ${String(p.importMigrationsMs).padStart(6)}`,
+      `  ${p.name.padEnd(28)} ${String(p.totalMs).padStart(6)} ${String(
+        p.manifestMs,
+      ).padStart(5)} ${String(p.resolveSchemaMs).padStart(5)} ${String(
+        p.importSchemaMs,
+      ).padStart(6)} ${String(p.resolveMigrationsMs).padStart(5)} ${String(
+        p.importMigrationsMs,
+      ).padStart(6)}`,
     );
   }
   console.log(
-    `  ${"SUM(cpu)".padEnd(28)} ${String(sum("totalMs")).padStart(6)} ${String(sum("manifestMs")).padStart(5)} ${String(sum("resolveSchemaMs")).padStart(5)} ${String(sum("importSchemaMs")).padStart(6)} ${String(sum("resolveMigrationsMs")).padStart(5)} ${String(sum("importMigrationsMs")).padStart(6)}`,
+    `  ${"SUM(cpu)".padEnd(28)} ${String(sum("totalMs")).padStart(6)} ${String(
+      sum("manifestMs"),
+    ).padStart(5)} ${String(sum("resolveSchemaMs")).padStart(5)} ${String(
+      sum("importSchemaMs"),
+    ).padStart(6)} ${String(sum("resolveMigrationsMs")).padStart(5)} ${String(
+      sum("importMigrationsMs"),
+    ).padStart(6)}`,
   );
   console.log(
     `  (wall time: look at db.discover-sections span — should be ~max(totalMs) not SUM)`,
@@ -347,13 +366,8 @@ export class DbService extends Service {
     return this.db!.client as unknown as SectionedClient;
   }
 
-  get effect(): { client: SectionedEffectClient } {
-    const db = this.db!;
-    return {
-      get client(): SectionedEffectClient {
-        return db.effectClient as unknown as SectionedEffectClient;
-      },
-    };
+  get effectClient(): SectionedEffectClient {
+    return this.db!.effectClient as unknown as SectionedEffectClient;
   }
 
   /**
@@ -396,7 +410,10 @@ export class DbService extends Service {
       const raw = await fs.readFile(collectionFilePath, "utf8");
       const index = JSON.parse(raw) as { activePageId?: string };
       if (index.activePageId) {
-        lastPageFilePath = this.getPageDataPath(collectionId, index.activePageId);
+        lastPageFilePath = this.getPageDataPath(
+          collectionId,
+          index.activePageId,
+        );
       }
     } catch {
       lastPageFilePath = null;
@@ -439,7 +456,7 @@ export class DbService extends Service {
           .map((s) => `${s.name}@v${s.migrations.length}`)
           .join(", ")})`,
       );
-      // 
+      //
     }
 
     const { http } = this.ctx;

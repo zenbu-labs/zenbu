@@ -140,7 +140,7 @@ function ensureDirWatcher(dir) {
   const closable = {
     close: () => {
       closed = true
-      if (subscription) void subscription.unsubscribe().catch(() => {})
+      if (subscription) return subscription.unsubscribe().catch(() => {})
     },
   }
   // Track for process-wide shutdown so the native watcher tears down

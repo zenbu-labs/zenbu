@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { createRequire } from "node:module"
+import { createServer as createNetServer } from "node:net"
 import { Service, runtime } from "../runtime"
 import { getAdvice, getAllScopes, getContentScripts, getAllContentScriptPaths } from "./advice-config"
 import type { ViewAdviceEntry } from "./advice-config"
@@ -212,6 +213,17 @@ function advicePreludePlugin(): Plugin {
   }
 }
 
+function getEphemeralPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createNetServer()
+    srv.listen(0, () => {
+      const { port } = srv.address() as { port: number }
+      srv.close(() => resolve(port))
+    })
+    srv.on("error", reject)
+  })
+}
+
 async function startRendererServer(options: RendererServerOptions): Promise<ViteDevServer> {
   const advicePlugins: any[] = [
     advicePreludePlugin(),
@@ -225,15 +237,21 @@ async function startRendererServer(options: RendererServerOptions): Promise<Vite
 
   let server: ViteDevServer
 
+  const port = options.port || await getEphemeralPort()
+  const sharedConfig = {
+    server: {
+      port,
+      strictPort: true,
+      hmr: { protocol: "ws", host: "localhost" } as const,
+    },
+    logLevel: "warn" as const,
+  }
+
   if (options.configFile) {
     server = await createServer({
+      ...sharedConfig,
       root: options.root,
       plugins: advicePlugins,
-      server: {
-        port: options.port ?? 0,
-        strictPort: options.port !== undefined && options.port !== 0,
-        hmr: { protocol: "ws", host: "localhost" },
-      },
       configFile: options.configFile,
     })
   } else {
@@ -251,14 +269,10 @@ async function startRendererServer(options: RendererServerOptions): Promise<Vite
     }
 
     server = await createServer({
+      ...sharedConfig,
       root: options.root,
       plugins,
       resolve: options.resolve,
-      server: {
-        port: options.port ?? 0,
-        strictPort: options.port !== undefined && options.port !== 0,
-        hmr: { protocol: "ws", host: "localhost" },
-      },
       configFile: false,
     })
   }

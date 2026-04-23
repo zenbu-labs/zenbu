@@ -79,7 +79,7 @@ describe.skipIf(!codexAvailable)("Agent (ephemeral mode)", () => {
   it("starts in initializing state", async () => {
     ({ agent } = await createEphemeralAgent());
 
-    const state = await agent.getState();
+    const state = agent.getState();
     expect(state.kind).toBe("initializing");
   });
 
@@ -88,7 +88,7 @@ describe.skipIf(!codexAvailable)("Agent (ephemeral mode)", () => {
 
     await agent.send([{ type: "text", text: "hello" }]);
 
-    const state = await agent.getState();
+    const state = agent.getState();
     expect(state.kind).toBe("ready");
   });
 
@@ -97,7 +97,7 @@ describe.skipIf(!codexAvailable)("Agent (ephemeral mode)", () => {
 
     await agent.send([{ type: "text", text: "hello" }]);
 
-    const state = await agent.getState();
+    const state = agent.getState();
     expect(state.kind).toBe("ready");
     if (state.kind === "ready") {
       expect(state.sessionId).toBeTruthy();
@@ -124,7 +124,7 @@ describe.skipIf(!codexAvailable)("Agent (ephemeral mode)", () => {
 
     await agent.close();
 
-    const state = await agent.getState();
+    const state = agent.getState();
     expect(state.kind).toBe("closed");
   });
 

@@ -44,12 +44,15 @@ export class InsertService extends Service {
     sessionId: string;
     payload: TokenPayload;
   }): Promise<InsertTokenResult> {
-    const client = this.ctx.db.effect.client;
+    const client = this.ctx.db.effectClient;
     const kernel = client.readRoot().plugin.kernel;
 
     const live = findLiveSessionTab(kernel, args.sessionId);
     if (live) {
-      const agentId = findAgentIdForSession(kernel.windowStates, args.sessionId);
+      const agentId = findAgentIdForSession(
+        kernel.windowStates,
+        args.sessionId,
+      );
       const requestId = nanoid();
       this.ctx.rpc.emit.insert.requested({
         requestId,
@@ -66,9 +69,7 @@ export class InsertService extends Service {
     if (!agentId) {
       // No such session. Caller gave us a stale id — fail quietly; there's
       // no UI to surface it on.
-      console.warn(
-        `[insert] insertToken: unknown sessionId ${args.sessionId}`,
-      );
+      console.warn(`[insert] insertToken: unknown sessionId ${args.sessionId}`);
       return { delivered: "persisted" };
     }
 
@@ -86,10 +87,10 @@ export class InsertService extends Service {
         );
         const nextBlobs = [
           ...(existing?.chatBlobs ?? []),
-          ...((args.payload.blobs ?? []).map((b) => ({
+          ...(args.payload.blobs ?? []).map((b) => ({
             blobId: b.blobId,
             mimeType: b.mimeType,
-          }))),
+          })),
         ];
         root.plugin.kernel.composerDrafts = {
           ...drafts,
@@ -121,7 +122,7 @@ export class InsertService extends Service {
     agentId: string;
     payload: TokenPayload;
   }): Promise<{ ok: boolean }> {
-    const client = this.ctx.db.effect.client;
+    const client = this.ctx.db.effectClient;
     await Effect.runPromise(
       client.update((root) => {
         const drafts = root.plugin.kernel.composerDrafts ?? {};
@@ -132,10 +133,10 @@ export class InsertService extends Service {
         );
         const nextBlobs = [
           ...(existing?.chatBlobs ?? []),
-          ...((args.payload.blobs ?? []).map((b) => ({
+          ...(args.payload.blobs ?? []).map((b) => ({
             blobId: b.blobId,
             mimeType: b.mimeType,
-          }))),
+          })),
         ];
         root.plugin.kernel.composerDrafts = {
           ...drafts,

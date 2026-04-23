@@ -39,7 +39,7 @@ describe.skipIf(!codexAvailable)("AcpClient", () => {
 
   it("initializes and gets capabilities", async () => {
     client = await createTestClient();
-    const state = await client.getState();
+    const state = client.getState();
     expect(state).toBe("disconnected");
 
     const result = await client.initialize({
@@ -52,7 +52,7 @@ describe.skipIf(!codexAvailable)("AcpClient", () => {
     expect(result.agentCapabilities?.loadSession).toBe(true);
     expect(result.agentInfo?.name).toBe("codex-acp");
 
-    const stateAfter = await client.getState();
+    const stateAfter = client.getState();
     expect(stateAfter).toBe("initializing");
   });
 
@@ -65,7 +65,7 @@ describe.skipIf(!codexAvailable)("AcpClient", () => {
     expect(session.sessionId).toBeTruthy();
     expect(typeof session.sessionId).toBe("string");
 
-    const state = await client.getState();
+    const state = client.getState();
     expect(state).toBe("ready");
 
     const sessionId = await client.getSessionId();
@@ -87,7 +87,7 @@ describe.skipIf(!codexAvailable)("AcpClient", () => {
 
     expect(result.stopReason).toBe("end_turn");
 
-    const state = await client.getState();
+    const state = client.getState();
     expect(state).toBe("ready");
 
     expect(events.length).toBeGreaterThan(0);
@@ -116,21 +116,21 @@ describe.skipIf(!codexAvailable)("AcpClient", () => {
 
   it("transitions through states correctly", async () => {
     client = await createTestClient();
-    expect(await client.getState()).toBe("disconnected");
+    expect(client.getState()).toBe("disconnected");
 
     await client.initialize({ protocolVersion: PROTOCOL_VERSION });
-    expect(await client.getState()).toBe("initializing");
+    expect(client.getState()).toBe("initializing");
 
     const session = await client.newSession({ cwd: process.cwd(), mcpServers: [] });
-    expect(await client.getState()).toBe("ready");
+    expect(client.getState()).toBe("ready");
 
     await client.prompt({
         sessionId: session.sessionId,
         prompt: [{ type: "text", text: "hi" }],
       });
-    expect(await client.getState()).toBe("ready");
+    expect(client.getState()).toBe("ready");
 
     await client.close();
-    expect(await client.getState()).toBe("disconnected");
+    expect(client.getState()).toBe("disconnected");
   });
 });

@@ -8,7 +8,13 @@ import { DbService } from "./db";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ICONS_DIR = path.resolve(__dirname, "../../../shared/default-icons");
 
-const SEEDED_IDS = ["codex", "claude", "cursor", "opencode", "copilot"] as const;
+const SEEDED_IDS = [
+  "codex",
+  "claude",
+  "cursor",
+  "opencode",
+  "copilot",
+] as const;
 
 export class AgentIconsSeedService extends Service {
   static key = "agent-icons-seed";
@@ -21,7 +27,7 @@ export class AgentIconsSeedService extends Service {
     if (this._seeded) return;
     this._seeded = true;
 
-    const client = this.ctx.db.effect.client;
+    const client = this.ctx.db.effectClient;
     const kernel = client.readRoot().plugin.kernel;
     const configs = kernel.agentConfigs ?? [];
 
@@ -58,7 +64,9 @@ export class AgentIconsSeedService extends Service {
     );
 
     console.log(
-      `[agent-icons-seed] seeded ${Object.keys(blobIds).length} default icon(s): ${Object.keys(blobIds).join(", ")}`,
+      `[agent-icons-seed] seeded ${
+        Object.keys(blobIds).length
+      } default icon(s): ${Object.keys(blobIds).join(", ")}`,
     );
   }
 }

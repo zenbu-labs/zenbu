@@ -694,33 +694,46 @@ app.whenReady().then(async () => {
         (win as any).__zenbu_on_closed = null;
       }
 
-      const finalize = () => {
+      const finalize = async () => {
         try {
-          closeAllWatchers();
+          await closeAllWatchers();
         } catch (err) {
           console.error("[shell] closeAllWatchers failed:", err);
         }
-        // Yield once so any FSEvents/dispatch callbacks queued before
-        // watcher.close() ran get delivered into the now-closed watchers
-        // (where they're dropped) instead of racing Electron's final
-        // unwind. Without this drain, a late fsevents dispatch can fire
-        // during V8 isolate teardown → napi assertion → SIGABRT →
-        // macOS shows "Zenbu quit unexpectedly" after a clean relaunch.
-        setImmediate(() => {
-          shutdownState = "ready";
-          app.quit();
-        });
+        // Hard-kill ourselves. Every service is torn down, every
+        // watcher unsubscribed, every db flushed. Both app.quit() and
+        // app.exit() still go through FreeEnvironment → CleanupHandles
+        // where @parcel/watcher@2.5.6's napi_async_cleanup_hook has a
+        // PromiseRunner::onWorkComplete bug: on env teardown (napi_cancelled),
+        // it falls through to error-handling code that calls napi
+        // (`napi_get_last_error_info`, `Error::New`) against a dying env →
+        // napi_fatal_error → SIGABRT → macOS crash dialog. SIGKILL bypasses
+        // FreeEnvironment entirely.
+        process.kill(process.pid, "SIGKILL");
       };
+
+      // Hard ceiling: SIGKILL within 2s no matter what runtime.shutdown does.
+      // Prevents the race where a slow teardown lets Electron force env
+      // teardown before our SIGKILL fires (triggering the upstream bug).
+      const hardKillTimer = setTimeout(() => {
+        console.warn("[shell] shutdown timed out at 2s — forcing SIGKILL");
+        process.kill(process.pid, "SIGKILL");
+      }, 2000);
 
       const r = (globalThis as any).__zenbu_service_runtime__;
       if (r) {
         r.shutdown()
-          .then(finalize)
+          .then(() => {
+            clearTimeout(hardKillTimer);
+            return finalize();
+          })
           .catch((err: any) => {
             console.error("[shell] runtime.shutdown failed:", err);
+            clearTimeout(hardKillTimer);
             finalize();
           });
       } else {
+        clearTimeout(hardKillTimer);
         finalize();
       }
     });

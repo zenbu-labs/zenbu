@@ -20,7 +20,6 @@
 //   useFocusOnRequest("orchestrator", () => rootRef.current?.focus())
 
 import { useCallback, useEffect, useRef } from "react";
-import * as Effect from "effect/Effect";
 import { useDb } from "./kyju-react";
 import { useKyjuClient } from "./providers";
 
@@ -56,13 +55,11 @@ export function useRequestFocus() {
       const nonce = `${Date.now().toString(36)}-${Math.random()
         .toString(36)
         .slice(2, 8)}`;
-      await Effect.runPromise(
-        (client as any).update((root: any) => {
-          root.plugin.kernel.focusRequestTarget = target;
-          root.plugin.kernel.focusRequestWindowId = windowId;
-          root.plugin.kernel.focusRequestNonce = nonce;
-        }),
-      );
+      await client.update((root: any) => {
+        root.plugin.kernel.focusRequestTarget = target;
+        root.plugin.kernel.focusRequestWindowId = windowId;
+        root.plugin.kernel.focusRequestNonce = nonce;
+      });
     },
     [client],
   );

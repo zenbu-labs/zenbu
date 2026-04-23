@@ -131,7 +131,7 @@ export class ViewRegistryService extends Service {
   }
 
   private async syncToDb(): Promise<void> {
-    const client = this.ctx.db.effect.client;
+    const client = this.ctx.db.effectClient;
     const snapshot = [...this.views.values()].map((e) => ({
       scope: e.scope,
       url: e.url,
@@ -162,9 +162,14 @@ function parseJsonc(str: string): unknown {
     if (str[i] === '"') {
       let j = i + 1;
       while (j < str.length) {
-        if (str[j] === "\\") { j += 2; }
-        else if (str[j] === '"') { j++; break; }
-        else { j++; }
+        if (str[j] === "\\") {
+          j += 2;
+        } else if (str[j] === '"') {
+          j++;
+          break;
+        } else {
+          j++;
+        }
       }
       result += str.slice(i, j);
       i = j;

@@ -63,7 +63,7 @@ export class FileWatcher {
 			const closable: Closable = {
 				close: () => {
 					closed = true;
-					if (subscription) void subscription.unsubscribe().catch(() => {});
+					if (subscription) return subscription.unsubscribe().catch(() => {});
 				},
 			};
 			// Track for process-wide shutdown — see `pause.ts`.

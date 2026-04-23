@@ -7,6 +7,8 @@ import {
   useState,
   useEffect,
   useRef,
+  lazy,
+  Suspense,
 } from "react";
 import {
   SearchIcon,
@@ -47,7 +49,12 @@ import {
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu";
 import { LeafPane } from "./components/LeafPane";
-import { SettingsDialog } from "./components/SettingsDialog";
+// SettingsDialog statically imports Streamdown which drags in shiki + ~40
+// syntax-highlighting themes (~3MB pre-parsed). Code-split it so the heavy
+// chunk only loads when the user opens settings — keeps first-paint lean.
+const SettingsDialog = lazy(() =>
+  import("./components/SettingsDialog").then((m) => ({ default: m.SettingsDialog })),
+);
 import { ReviewMode, type ReviewFileEntry } from "./components/ReviewMode";
 import {
   PluginUpdateModal,
@@ -901,12 +908,16 @@ function OrchestratorContent() {
       tabIndex={-1}
       className="flex h-full flex-col bg-[#F4F4F4] outline-none"
     >
-      <SettingsDialog
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-        initialSection={settingsSection}
-        onRequestReview={handleRequestReview}
-      />
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsDialog
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+            initialSection={settingsSection}
+            onRequestReview={handleRequestReview}
+          />
+        </Suspense>
+      )}
       {reviewEntries && (
         <ReviewMode
           entries={reviewEntries}

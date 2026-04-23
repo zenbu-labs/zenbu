@@ -49,8 +49,8 @@ function makeObserver() {
   };
 }
 
-async function currentSessionId(agent: Agent): Promise<string | null> {
-  const state = await agent.getState();
+function currentSessionId(agent: Agent): string | null {
+  const state = agent.getState();
   return state.kind === "ready" || state.kind === "prompting"
     ? state.sessionId
     : null;
@@ -149,7 +149,7 @@ describe.skipIf(!codexAvailable)("Agent config update (Codex)", () => {
     const responseA = extractResponseText(obs.events);
     expect(responseA).toContain(dirA);
 
-    const sessionBefore = await currentSessionId(agent);
+    const sessionBefore = currentSessionId(agent);
     expect(sessionBefore).toBeTruthy();
     const eventCountBefore = obs.events.length;
 
@@ -162,14 +162,14 @@ describe.skipIf(!codexAvailable)("Agent config update (Codex)", () => {
         },
       ]);
 
-    const state = await agent.getState();
+    const state = agent.getState();
     expect(state.kind).toBe("ready");
 
     const responseB = extractResponseText(obs.events, eventCountBefore);
     expect(responseB).toContain(dirB);
     expect(responseB).not.toContain(dirA);
 
-    const sessionAfter = await currentSessionId(agent);
+    const sessionAfter = currentSessionId(agent);
     expect(sessionAfter).toBe(sessionBefore);
 
     expect(obs.events.length).toBeGreaterThan(eventCountBefore);
@@ -188,14 +188,14 @@ describe.skipIf(!codexAvailable)("Agent config update (Codex)", () => {
 
     await agent.send([{ type: "text", text: "hello" }]);
 
-    const sessionBefore = await currentSessionId(agent);
+    const sessionBefore = currentSessionId(agent);
     expect(sessionBefore).toBeTruthy();
 
     await agent.changeCwd(dirB);
 
     await agent.send([{ type: "text", text: "hello again" }]);
 
-    const sessionAfter = await currentSessionId(agent);
+    const sessionAfter = currentSessionId(agent);
     expect(sessionAfter).toBe(sessionBefore);
   }, 120_000);
 });
@@ -228,7 +228,7 @@ describe.skipIf(!codexAvailable || !cursorAvailable)(
       expect(codexResponse).toContain("alpha");
       const eventCountAfterCodex = obs.events.length;
 
-      const sessionBefore = await currentSessionId(agent);
+      const sessionBefore = currentSessionId(agent);
       expect(sessionBefore).toBeTruthy();
 
       await agent.changeStartCommand("agent", ["acp"]);
@@ -240,7 +240,7 @@ describe.skipIf(!codexAvailable || !cursorAvailable)(
           },
         ]);
 
-      const stateAfterSend = await agent.getState();
+      const stateAfterSend = agent.getState();
       expect(stateAfterSend.kind).toBe("ready");
 
       const cursorResponse = extractResponseText(
@@ -249,7 +249,7 @@ describe.skipIf(!codexAvailable || !cursorAvailable)(
       ).toLowerCase();
       expect(cursorResponse).toContain("beta");
 
-      const sessionAfter = await currentSessionId(agent);
+      const sessionAfter = currentSessionId(agent);
       expect(sessionAfter).toBeTruthy();
       expect(sessionAfter).not.toBe(sessionBefore);
 
@@ -277,7 +277,7 @@ describe.skipIf(!codexAvailable || !cursorAvailable)(
       expect(cursorResponse).toContain("gamma");
       const eventCountAfterCursor = obs.events.length;
 
-      const sessionBefore = await currentSessionId(agent);
+      const sessionBefore = currentSessionId(agent);
 
       await agent.changeStartCommand("npx", ["tsx", codexAcpBridge]);
 
@@ -288,7 +288,7 @@ describe.skipIf(!codexAvailable || !cursorAvailable)(
           },
         ]);
 
-      const state = await agent.getState();
+      const state = agent.getState();
       expect(state.kind).toBe("ready");
 
       const codexResponse = extractResponseText(
@@ -297,7 +297,7 @@ describe.skipIf(!codexAvailable || !cursorAvailable)(
       ).toLowerCase();
       expect(codexResponse).toContain("delta");
 
-      const sessionAfter = await currentSessionId(agent);
+      const sessionAfter = currentSessionId(agent);
       expect(sessionAfter).not.toBe(sessionBefore);
 
       expect(obs.events.length).toBeGreaterThan(eventCountAfterCursor);
@@ -311,14 +311,14 @@ describe.skipIf(!codexAvailable || !cursorAvailable)(
 
       await agent.send([{ type: "text", text: "hello" }]);
 
-      const sessionBefore = await currentSessionId(agent);
+      const sessionBefore = currentSessionId(agent);
       expect(sessionBefore).toBeTruthy();
 
       await agent.changeStartCommand("agent", ["acp"]);
 
       await agent.send([{ type: "text", text: "hello" }]);
 
-      const sessionAfter = await currentSessionId(agent);
+      const sessionAfter = currentSessionId(agent);
       expect(sessionAfter).toBeTruthy();
       expect(sessionAfter).not.toBe(sessionBefore);
     }, 120_000);
@@ -338,7 +338,7 @@ describe.skipIf(!codexAvailable || !cursorAvailable)(
 
       await agent.send([{ type: "text", text: "hello" }]);
 
-      const stateBefore = await agent.getState();
+      const stateBefore = agent.getState();
       expect(stateBefore.kind).toBe("ready");
 
       await agent.changeStartCommand(
@@ -492,7 +492,7 @@ describe.skipIf(!codexAvailable)("Agent handoff on loadSession unsupported", () 
     const responseAfterFirst = extractResponseText(obs.events);
     expect(responseAfterFirst.length).toBeGreaterThan(0);
 
-    const sessionBefore = await currentSessionId(agent);
+    const sessionBefore = currentSessionId(agent);
     expect(sessionBefore).toBeTruthy();
 
     const eventsBeforeRestart = obs.events.length;
@@ -506,7 +506,7 @@ describe.skipIf(!codexAvailable)("Agent handoff on loadSession unsupported", () 
         },
       ]);
 
-    const sessionAfter = await currentSessionId(agent);
+    const sessionAfter = currentSessionId(agent);
     expect(sessionAfter).not.toBe(sessionBefore);
 
     const responseAfterRestart = extractResponseText(

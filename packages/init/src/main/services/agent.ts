@@ -2,7 +2,6 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import * as Effect from "effect/Effect";
 import type * as acp from "@agentclientprotocol/sdk";
 import { Agent } from "@zenbu/agent/src/agent";
 import type { AgentDb } from "@zenbu/agent/src/schema";
@@ -44,7 +43,6 @@ function buildAcpEnv(): Record<string, string> {
   return env;
 }
 
-
 function expandVars(input: string, extraEnv: Record<string, string>): string {
   // Expand $VAR / ${VAR} against process.env + extraEnv, leading ~ against
   // home, and legacy {HOME} for older stored configs.
@@ -71,7 +69,6 @@ function parseStartCommand(
   const parts = expanded.split(/\s+/).filter(Boolean);
   return { command: parts[0] ?? "", args: parts.slice(1) };
 }
-
 
 const SUMMARIZATION_PROMPT = `You will be given a user's first message in a chat session. Generate a very short title (max 6 words) that captures the intent.
 
@@ -117,7 +114,8 @@ export class AgentService extends Service {
           fn(root.plugin.kernel);
         }),
       agents: client.plugin.kernel.agents as AgentDb["agents"],
-      archivedAgents: client.plugin.kernel.archivedAgents as AgentDb["archivedAgents"],
+      archivedAgents: client.plugin.kernel
+        .archivedAgents as AgentDb["archivedAgents"],
     };
   }
 
@@ -125,7 +123,7 @@ export class AgentService extends Service {
     const existing = this.processes.get(agentId);
     if (existing) return existing;
 
-    const client = this.ctx.db.effect.client;
+    const client = this.ctx.db.client;
     const kernel = client.readRoot().plugin.kernel;
     const agentConfig = kernel.agents.find((a) => a.id === agentId);
     if (!agentConfig?.startCommand) {
@@ -191,13 +189,11 @@ export class AgentService extends Service {
    * itself from its state machine via `_setState`.
    */
   private async markProcessErrored(agentId: string) {
-    const client = this.ctx.db.effect.client;
-    await Effect.runPromise(
-      client.update((root) => {
+    const client = this.ctx.db.client;
+    await client.update((root) => {
         const agent = root.plugin.kernel.agents.find((a) => a.id === agentId);
         if (agent) agent.processState = "error";
-      }),
-    ).catch(() => {});
+      }).catch(() => {});
   }
 
   private async setAgentTitle(
@@ -207,17 +203,15 @@ export class AgentService extends Service {
       | { kind: "generating" }
       | { kind: "set"; value: string },
   ) {
-    const client = this.ctx.db.effect.client;
-    await Effect.runPromise(
-      client.update((root) => {
+    const client = this.ctx.db.client;
+    await client.update((root) => {
         const agent = root.plugin.kernel.agents.find((a) => a.id === agentId);
         if (agent) agent.title = title;
-      }),
-    ).catch(() => {});
+      }).catch(() => {});
   }
 
   private async generateTitle(agentId: string, userMessage: string) {
-    const client = this.ctx.db.effect.client;
+    const client = this.ctx.db.client;
     const kernel = client.readRoot().plugin.kernel;
     const agentNode = kernel.agents.find((a) => a.id === agentId);
 
@@ -262,7 +256,7 @@ export class AgentService extends Service {
         },
         cwd,
         onSessionUpdate: (update) => {
-          const u = update ;
+          const u = update;
           if (
             u.sessionUpdate === "agent_message_chunk" &&
             u.content?.type === "text"
@@ -317,7 +311,7 @@ export class AgentService extends Service {
     // persisted on the record itself (`firstPromptSentAt`). The Agent class
     // flips this during send(); reading it here BEFORE dispatch gives us
     // the pre-send value. Used solely to gate one-shot title generation.
-    const kernel = this.ctx.db.effect.client.readRoot().plugin.kernel;
+    const kernel = this.ctx.db.client.readRoot().plugin.kernel;
     const isFirstMessage =
       kernel.agents.find((a) => a.id === agentId)?.firstPromptSentAt == null;
 
@@ -358,29 +352,24 @@ export class AgentService extends Service {
   }
 
   async appendUserPrompt(agentId: string, text: string) {
-    const client = this.ctx.db.effect.client;
+    const client = this.ctx.db.client;
     const agentNode = client.plugin.kernel.agents.find((a) => a.id === agentId);
     if (!agentNode) return;
 
     const now = Date.now();
-    await Effect.runPromise(
-      agentNode.eventLog.concat([
+    await agentNode.eventLog.concat([
         { timestamp: now, data: { kind: "user_prompt", text } },
-      ]),
-    );
+      ]);
     // set has a bug
-    const effect = agentNode.lastUserMessageAt?.set(now as never);
-    effect && (await Effect.runPromise(effect));
+    await agentNode.lastUserMessageAt?.set(now as never);
   }
 
   async setReloadMode(agentId: string, mode: "continue" | "keep-alive") {
-    const client = this.ctx.db.effect.client;
-    await Effect.runPromise(
-      client.update((root) => {
+    const client = this.ctx.db.client;
+    await client.update((root) => {
         const a = root.plugin.kernel.agents.find((x) => x.id === agentId);
         if (a) a.reloadMode = mode;
-      }),
-    );
+      });
   }
 
   async reload(agentId: string) {
@@ -397,14 +386,12 @@ export class AgentService extends Service {
     if (!agent) return;
     await agent.interrupt().catch(() => {});
 
-    const client = this.ctx.db.effect.client;
+    const client = this.ctx.db.client;
     const agentNode = client.plugin.kernel.agents.find((a) => a.id === agentId);
     if (agentNode) {
-      await Effect.runPromise(
-        agentNode.eventLog.concat([
+      await agentNode.eventLog.concat([
           { timestamp: Date.now(), data: { kind: "interrupted" as const } },
-        ]),
-      ).catch(() => {});
+        ]).catch(() => {});
     }
 
     // `status` flips back to "idle" automatically when the Agent's state
@@ -420,7 +407,7 @@ export class AgentService extends Service {
   }
 
   async changeAgentConfig(agentId: string, newConfigId: string) {
-    const client = this.ctx.db.effect.client;
+    const client = this.ctx.db.client;
     const kernel = client.readRoot().plugin.kernel;
     const newTemplate = kernel.agentConfigs.find((c) => c.id === newConfigId);
     if (!newTemplate) return;
@@ -430,8 +417,7 @@ export class AgentService extends Service {
     // three empty selects until ACP handshakes.
     const seeded = validSelectionFromTemplate(newTemplate);
 
-    await Effect.runPromise(
-      client.update((root) => {
+    await client.update((root) => {
         const agent = root.plugin.kernel.agents.find((a) => a.id === agentId);
         if (!agent) return;
         agent.configId = newConfigId;
@@ -441,8 +427,7 @@ export class AgentService extends Service {
         agent.mode = seeded.mode;
         agent.processState = "initializing";
         root.plugin.kernel.selectedConfigId = newConfigId;
-      }),
-    );
+      });
 
     const process = this.processes.get(agentId);
     if (process) {
@@ -467,16 +452,14 @@ export class AgentService extends Service {
   }
 
   async setConfigOption(agentId: string, configId: string, value: string) {
-    const client = this.ctx.db.effect.client;
-    await Effect.runPromise(
-      client.update((root) => {
+    const client = this.ctx.db.client;
+    await client.update((root) => {
         const agent = root.plugin.kernel.agents.find((a) => a.id === agentId);
         if (!agent) return;
         if (configId === "model") agent.model = value;
         else if (configId === "reasoning_effort") agent.thinkingLevel = value;
         else if (configId === "mode") agent.mode = value;
-      }),
-    );
+      });
     const process = this.processes.get(agentId);
     if (process) {
       await process.setSessionConfigOption(configId, value).catch(() => {});
@@ -493,9 +476,8 @@ export class AgentService extends Service {
     configId: string,
     value: string,
   ) {
-    const client = this.ctx.db.effect.client;
-    await Effect.runPromise(
-      client.update((root) => {
+    const client = this.ctx.db.client;
+    await client.update((root) => {
         const template = root.plugin.kernel.agentConfigs.find(
           (c) => c.id === configTemplateId,
         );
@@ -506,8 +488,7 @@ export class AgentService extends Service {
           template.defaultConfiguration.thinkingLevel = value;
         else if (configId === "mode")
           template.defaultConfiguration.mode = value;
-      }),
-    );
+      });
   }
 
   /**
@@ -518,10 +499,10 @@ export class AgentService extends Service {
    * directly. Returns in timestamp order, empty when the collection is
    * missing or empty.
    */
-  async getAgentEvents(agentId: string): Promise<
-    Array<{ timestamp: number; data: unknown }>
-  > {
-    const kernel = this.ctx.db.effect.client.readRoot().plugin.kernel;
+  async getAgentEvents(
+    agentId: string,
+  ): Promise<Array<{ timestamp: number; data: unknown }>> {
+    const kernel = this.ctx.db.client.readRoot().plugin.kernel;
     const agent = kernel.agents.find((a) => a.id === agentId);
     const collectionId = (agent?.eventLog as any)?.collectionId as
       | string
@@ -568,15 +549,13 @@ export class AgentService extends Service {
   }
 
   async changeCwd(agentId: string, newCwd: string) {
-    const client = this.ctx.db.effect.client;
-    await Effect.runPromise(
-      client.update((root) => {
+    const client = this.ctx.db.client;
+    await client.update((root) => {
         const agent = root.plugin.kernel.agents.find((a) => a.id === agentId);
         if (!agent) return;
         if (!agent.metadata) agent.metadata = {};
         agent.metadata.cwd = newCwd;
-      }),
-    );
+      });
     const process = this.processes.get(agentId);
     if (process) {
       await process.changeCwd(newCwd);
@@ -639,7 +618,7 @@ export class AgentService extends Service {
           return;
         }
 
-        const kernel = this.ctx.db.effect.client.readRoot().plugin.kernel;
+        const kernel = this.ctx.db.client.readRoot().plugin.kernel;
         for (const [agentId, agent] of [...this.processes.entries()]) {
           const record = kernel.agents.find((a) => a.id === agentId);
           const mode = record?.reloadMode ?? "keep-alive";
@@ -647,7 +626,7 @@ export class AgentService extends Service {
             console.log(`[agent] keeping ${agentId} alive across reload`);
             continue;
           }
-          const state = await agent.getState();
+          const state = agent.getState();
           if (state.kind === "prompting") {
             console.log(
               `[agent] marking ${agentId} for auto-continue (was prompting)`,

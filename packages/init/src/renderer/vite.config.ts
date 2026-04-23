@@ -9,10 +9,20 @@ const packagesDir = join(homedir(), ".zenbu", "plugins", "zenbu", "packages")
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
-    alias: {
-      "@": resolve(__dirname, "."),
-      "@testbu": packagesDir,
-    },
+    alias: [
+      { find: "@", replacement: resolve(__dirname, ".") },
+      { find: "@testbu", replacement: packagesDir },
+      // Tree-shaking shim for lucide-react. The barrel pulls in ~1.1MB of
+      // icons because esbuild can't tree-shake through the optimizeDeps
+      // entry. The shim re-exports only the icons we actually use, sourced
+      // from lucide-react's per-icon files. Regex-anchored on the bare
+      // specifier so deep imports (`lucide-react/dist/esm/icons/...`) inside
+      // the shim still resolve normally to the real package.
+      {
+        find: /^lucide-react$/,
+        replacement: resolve(__dirname, "./lib/lucide-shim.ts"),
+      },
+    ],
   },
   server: {
     warmup: {

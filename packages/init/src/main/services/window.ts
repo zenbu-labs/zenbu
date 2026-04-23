@@ -70,7 +70,7 @@ export class WindowService extends Service {
 
   async createWindowWithAgent() {
     const { baseWindow, db } = this.ctx;
-    const client = db.effect.client;
+    const client = db.effectClient;
     const kernel = client.readRoot().plugin.kernel;
     const selectedConfig =
       kernel.agentConfigs.find((c) => c.id === kernel.selectedConfigId) ??
@@ -116,7 +116,7 @@ export class WindowService extends Service {
             sidebarOpen: false,
             tabSidebarOpen: true,
             sidebarPanel: "overview",
-            persisted: false
+            persisted: false,
           },
         ];
       }),
@@ -134,7 +134,7 @@ export class WindowService extends Service {
 
   async createWindowWithLastOrNewAgent() {
     const { baseWindow, db } = this.ctx;
-    const client = db.effect.client;
+    const client = db.effectClient;
     const kernel = client.readRoot().plugin.kernel;
     const lastAgent = kernel.agents
       .filter((a) => a.lastUserMessageAt != null)
@@ -173,7 +173,7 @@ export class WindowService extends Service {
             sidebarOpen: false,
             tabSidebarOpen: true,
             sidebarPanel: "overview",
-            persisted: false
+            persisted: false,
           },
         ];
       }),
@@ -237,7 +237,7 @@ export class WindowService extends Service {
     sessionId: string;
   }): Promise<{ windowId: string } | null> {
     const { baseWindow, db } = this.ctx;
-    const client = db.effect.client;
+    const client = db.effectClient;
     const kernel = client.readRoot().plugin.kernel;
 
     const sourceWinState = (kernel.windowStates ?? []).find(
@@ -276,7 +276,7 @@ export class WindowService extends Service {
             sidebarOpen: false,
             tabSidebarOpen: true,
             sidebarPanel: "overview",
-            persisted: false
+            persisted: false,
           },
         ];
         const srcWs = k.windowStates.find(
@@ -312,7 +312,7 @@ export class WindowService extends Service {
     screenY: number;
   }): Promise<{ previewWindowId: string } | null> {
     const { baseWindow, db } = this.ctx;
-    const client = db.effect.client;
+    const client = db.effectClient;
     const kernel = client.readRoot().plugin.kernel;
 
     const sourceWinState = (kernel.windowStates ?? []).find(
@@ -495,7 +495,7 @@ export class WindowService extends Service {
     if (preview && !preview.isDestroyed()) preview.close();
 
     const { baseWindow, db } = this.ctx;
-    const client = db.effect.client;
+    const client = db.effectClient;
 
     const windowId = nanoid();
     const newSessionId = nanoid();
@@ -526,9 +526,9 @@ export class WindowService extends Service {
             tabSidebarOpen: true,
             sidebarPanel: "overview",
             /**
-             * come back to this 
+             * come back to this
              */
-            persisted: false
+            persisted: false,
           },
         ];
       }),
@@ -557,7 +557,7 @@ export class WindowService extends Service {
     this.previewWindows.delete(opts.previewWindowId);
 
     if (pending) {
-      const client = this.ctx.db.effect.client;
+      const client = this.ctx.db.effectClient;
       await Effect.runPromise(
         client.update((root) => {
           const srcWs = (root.plugin.kernel.windowStates ?? []).find(
@@ -637,7 +637,7 @@ export class WindowService extends Service {
       >();
 
       let currentViewPath =
-        db.effect.client.readRoot().plugin.kernel.orchestratorViewPath ??
+        db.effectClient.readRoot().plugin.kernel.orchestratorViewPath ??
         DEFAULT_VIEW_PATH;
 
       const attachView = (
@@ -677,6 +677,15 @@ export class WindowService extends Service {
         win.on("resize", layout);
 
         if (loadingView) {
+          view.webContents.once("did-start-loading", () => {
+            mark("orchestrator-did-start-loading", { windowId });
+          });
+          view.webContents.once("did-start-navigation", () => {
+            mark("orchestrator-did-start-navigation", { windowId });
+          });
+          view.webContents.once("did-navigate", () => {
+            mark("orchestrator-did-navigate", { windowId });
+          });
           view.webContents.once("dom-ready", () => {
             mark("orchestrator-dom-ready", { windowId });
           });
@@ -699,7 +708,9 @@ export class WindowService extends Service {
           // Failsafe: if the orchestrator errors out, still swap so the user
           // isn't stuck staring at the loading spinner forever.
           view.webContents.once("did-fail-load", (_e, code, desc) => {
-            console.error(`[window] orchestrator failed to load (${code}): ${desc}`);
+            console.error(
+              `[window] orchestrator failed to load (${code}): ${desc}`,
+            );
             swap();
           });
         }
@@ -723,11 +734,9 @@ export class WindowService extends Service {
         const cwd = process.cwd();
         const qs = `wsPort=${http.port}&cwd=${encodeURIComponent(
           cwd,
-        )}&defaultCwd=${encodeURIComponent(
-          DEFAULT_CWD,
-        )}&webContentsId=${view.webContents.id}&windowId=${encodeURIComponent(
-          windowId,
-        )}`;
+        )}&defaultCwd=${encodeURIComponent(DEFAULT_CWD)}&webContentsId=${
+          view.webContents.id
+        }&windowId=${encodeURIComponent(windowId)}`;
         let url: string;
         if (viewPath.startsWith("http://") || viewPath.startsWith("https://")) {
           const sep = viewPath.includes("?") ? "&" : "?";
@@ -767,7 +776,7 @@ export class WindowService extends Service {
         };
         const onClosed = () => {
           Effect.runPromise(
-            db.effect.client.update((root) => {
+            db.effectClient.update((root) => {
               root.plugin.kernel.windowStates = (
                 root.plugin.kernel.windowStates ?? []
               ).filter((ws) => ws.id !== windowId || ws.persisted === true);
@@ -828,15 +837,16 @@ export class WindowService extends Service {
       this._mountNewWindows = mountNew;
       mountNew();
 
-      const unsub = db.effect.client.plugin.kernel.orchestratorViewPath.subscribe(
-        (newPath) => {
-          const resolved = newPath || DEFAULT_VIEW_PATH;
-          if (resolved === currentViewPath) return;
-          currentViewPath = resolved;
-          teardownAllViews();
-          mountNew();
-        },
-      );
+      const unsub =
+        db.effectClient.plugin.kernel.orchestratorViewPath.subscribe(
+          (newPath) => {
+            const resolved = newPath || DEFAULT_VIEW_PATH;
+            if (resolved === currentViewPath) return;
+            currentViewPath = resolved;
+            teardownAllViews();
+            mountNew();
+          },
+        );
 
       return () => {
         unsub();
@@ -924,7 +934,7 @@ export class WindowService extends Service {
 
       const writeFocusedWindowId = (id: string | null) => {
         Effect.runPromise(
-          db.effect.client.update((root) => {
+          db.effectClient.update((root) => {
             if (root.plugin.kernel.focusedWindowId !== id) {
               root.plugin.kernel.focusedWindowId = id;
             }

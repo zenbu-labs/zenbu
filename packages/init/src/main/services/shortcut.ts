@@ -128,7 +128,9 @@ export class ShortcutService extends Service {
     this.entries.set(def.id, entry);
     void this.syncRegistryToDb();
     console.log(
-      `[shortcut] registered "${entry.id}" (${entry.defaultBinding}) scope=${entry.scope}${captureAtWebContents ? " [wc-capture]" : ""}`,
+      `[shortcut] registered "${entry.id}" (${entry.defaultBinding}) scope=${
+        entry.scope
+      }${captureAtWebContents ? " [wc-capture]" : ""}`,
     );
     return () => {
       if (this.entries.get(def.id) === entry) {
@@ -143,8 +145,11 @@ export class ShortcutService extends Service {
    * RPC: settings UI writes a user-chosen binding. Pass `null` to clear the
    * override and fall back to the default.
    */
-  async setBinding(id: string, binding: string | null): Promise<{ ok: boolean }> {
-    const client = this.ctx.db.effect.client;
+  async setBinding(
+    id: string,
+    binding: string | null,
+  ): Promise<{ ok: boolean }> {
+    const client = this.ctx.db.effectClient;
     await Effect.runPromise(
       client.update((root) => {
         const overrides = root.plugin.kernel.shortcutOverrides ?? {};
@@ -167,7 +172,7 @@ export class ShortcutService extends Service {
 
   /** RPC: disable a shortcut (no binding fires it). Enable via `enable(id)`. */
   async disable(id: string): Promise<{ ok: boolean }> {
-    const client = this.ctx.db.effect.client;
+    const client = this.ctx.db.effectClient;
     await Effect.runPromise(
       client.update((root) => {
         const disabled = root.plugin.kernel.shortcutDisabled ?? [];
@@ -180,7 +185,7 @@ export class ShortcutService extends Service {
   }
 
   async enable(id: string): Promise<{ ok: boolean }> {
-    const client = this.ctx.db.effect.client;
+    const client = this.ctx.db.effectClient;
     await Effect.runPromise(
       client.update((root) => {
         const disabled = root.plugin.kernel.shortcutDisabled ?? [];
@@ -282,24 +287,16 @@ export class ShortcutService extends Service {
     this.setup("webContents-capture", () => {
       const tracked = new Set<WebContents>();
 
-      const handleInput = (
-        event: Electron.Event,
-        input: Electron.Input,
-      ) => {
+      const handleInput = (event: Electron.Event, input: Electron.Input) => {
         if (input.type !== "keyDown") return;
         for (const entry of this.entries.values()) {
           if (!entry.captureAtWebContents || !entry.parsedBinding) continue;
           if (!matchesBinding(entry.parsedBinding, input)) continue;
           event.preventDefault();
           const focusedWindowId =
-            this.ctx.db.effect.client.readRoot().plugin.kernel.focusedWindowId ??
-            null;
-          void this.dispatch(
-            entry.id,
-            entry.scope,
-            focusedWindowId,
-            null,
-          );
+            this.ctx.db.effectClient.readRoot().plugin.kernel
+              .focusedWindowId ?? null;
+          void this.dispatch(entry.id, entry.scope, focusedWindowId, null);
           return;
         }
       };
@@ -332,7 +329,7 @@ export class ShortcutService extends Service {
   }
 
   private async syncRegistryToDb(): Promise<void> {
-    const client = this.ctx.db.effect.client;
+    const client = this.ctx.db.effectClient;
     const snapshot = [...this.entries.values()].map((e) => ({
       id: e.id,
       defaultBinding: e.defaultBinding,

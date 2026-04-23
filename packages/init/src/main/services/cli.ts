@@ -70,7 +70,7 @@ export class CliService extends Service {
   }
 
   listAgents() {
-    const kernel = this.ctx.db.effect.client.readRoot().plugin.kernel;
+    const kernel = this.ctx.db.effectClient.readRoot().plugin.kernel;
     return {
       agents: kernel.agents.map((a) => ({
         id: a.id,
@@ -86,7 +86,7 @@ export class CliService extends Service {
     windowId: string;
     agentId: string | null;
   }> {
-    const client = this.ctx.db.effect.client;
+    const client = this.ctx.db.effectClient;
     const kernel = client.readRoot().plugin.kernel;
     const windowId = nanoid();
 

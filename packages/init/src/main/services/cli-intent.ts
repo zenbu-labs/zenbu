@@ -60,7 +60,7 @@ export class CliIntentService extends Service {
 
     this._processed = true;
 
-    const client = this.ctx.db.effect.client;
+    const client = this.ctx.db.effectClient;
 
     // When nothing was passed on the CLI (spotlight/dock open), fall back to
     // the last agent the user interacted with. If none exists, create a fresh
@@ -101,7 +101,9 @@ export class CliIntentService extends Service {
           kernel.windowStates = kernel.windowStates.filter(
             (ws) => liveWindowIds.has(ws.id) || ws.persisted,
           );
-          console.log(`[cli-intent] pruned ${prunedCount} orphaned windowStates`);
+          console.log(
+            `[cli-intent] pruned ${prunedCount} orphaned windowStates`,
+          );
         }
 
         // Ensure the persisted main windowState exists. On first ever boot,
@@ -168,7 +170,9 @@ export class CliIntentService extends Service {
             if (agent) {
               const names = kernel.agentConfigs.map((c) => c.name).join(", ");
               console.warn(
-                `[cli-intent] No agent config matching "${agent}". Available: ${names || "(none)"}`,
+                `[cli-intent] No agent config matching "${agent}". Available: ${
+                  names || "(none)"
+                }`,
               );
             } else {
               console.warn(
@@ -226,7 +230,11 @@ export class CliIntentService extends Service {
       });
 
     console.log(
-      `[cli-intent] applied${agent ? ` agent=${agent}` : ""}${existingAgentId ? ` agentId=${existingAgentId}` : ""}${cwd ? ` cwd=${cwd}` : ""}${fallbackToNewAgent ? " (fallback: new agent)" : ""}`,
+      `[cli-intent] applied${agent ? ` agent=${agent}` : ""}${
+        existingAgentId ? ` agentId=${existingAgentId}` : ""
+      }${cwd ? ` cwd=${cwd}` : ""}${
+        fallbackToNewAgent ? " (fallback: new agent)" : ""
+      }`,
     );
   }
 }

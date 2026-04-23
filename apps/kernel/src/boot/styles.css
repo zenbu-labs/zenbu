@@ -58,14 +58,11 @@ body {
   color: var(--fg);
   letter-spacing: -0.005em;
   text-align: center;
-  transition: opacity 0.12s ease;
-}
-
-.detail {
-  font-size: 12px;
-  color: var(--muted-fg);
-  letter-spacing: -0.002em;
-  text-align: center;
-  min-height: 1em;
-  transition: opacity 0.12s ease;
+  /* Lock height so text swaps (per-service status updates) don't shift the
+   * gif above. `nowrap` prevents long messages from wrapping to a second
+   * line; the fixed line-height guarantees a single rendered row even
+   * before any text is set. */
+  white-space: nowrap;
+  line-height: 1.4;
+  height: 1.4em;
 }

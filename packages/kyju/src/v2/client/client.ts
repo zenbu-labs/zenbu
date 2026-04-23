@@ -672,6 +672,9 @@ function wrapEffectProxy(target: any): any {
               ),
             );
           }
+          if (result != null && typeof result === "object" && !Array.isArray(result)) {
+            return wrapEffectProxy(result);
+          }
           return result;
         };
       }

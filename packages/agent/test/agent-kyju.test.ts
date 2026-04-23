@@ -368,7 +368,7 @@ describe.skipIf(!codexAvailable)("Agent × kyju integration", () => {
     expect(row?.status).toBe("idle");
 
     // But the agent's internal state machine has the session.
-    const state = await agent.getState();
+    const state = agent.getState();
     expect(state.kind).toBe("ready");
     if (state.kind === "ready") {
       expect(state.sessionId).toBeTruthy();

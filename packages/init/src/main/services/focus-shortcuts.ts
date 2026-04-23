@@ -42,7 +42,7 @@ export class FocusShortcutsService extends Service {
     target: string,
     windowId: string | null,
   ): Promise<void> {
-    const client = this.ctx.db.effect.client;
+    const client = this.ctx.db.effectClient;
     const nonce = `${Date.now().toString(36)}-${Math.random()
       .toString(36)
       .slice(2, 8)}`;

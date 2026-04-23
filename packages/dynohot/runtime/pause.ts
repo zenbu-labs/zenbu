@@ -101,7 +101,7 @@ export function isWatcherPathPaused(absolutePath: string): boolean {
 const WATCHER_SET_KEY = Symbol.for("dynohot.fileWatcher.closables");
 
 interface Closable {
-	close(): void;
+	close(): void | Promise<void>;
 }
 
 function getClosables(): Set<Closable> {
@@ -132,14 +132,11 @@ export function registerWatcherClosable(watcher: Closable): () => void {
  * before a hard process exit so FSEvents stops dispatching before the V8
  * isolate dies.
  */
-export function closeAllWatchers(): void {
+export async function closeAllWatchers(): Promise<void> {
 	const set = getClosables();
-	for (const watcher of set) {
-		try {
-			watcher.close();
-		} catch {
-			// best-effort; we're tearing down anyway
-		}
-	}
+	const all = [...set];
 	set.clear();
+	await Promise.allSettled(all.map((w) => {
+		try { return w.close(); } catch { return; }
+	}));
 }
