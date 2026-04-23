@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.typetest.json"
+    "typecheck": "tsc --noEmit -p tsconfig.typetest.json",
+    "lint": "eslint . --max-warnings=0"
   },
   "main": "src/v2/index.ts",
   "exports": {
@@ -34,12 +35,15 @@
     "@testing-library/react": "^16.3.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.2.3",
+    "@zenbu/lint": "workspace:*",
     "esbuild": "^0.25.12",
+    "eslint": "^9.0.0",
     "jsdom": "^26.1.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "tsx": "^4.21.0",
     "type-testing": "^0.2.0",
+    "typescript": "^5.4.5",
     "vitest": "^3.2.4"
   }
 }

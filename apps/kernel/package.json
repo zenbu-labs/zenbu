@@ -12,7 +12,9 @@
     "dist:mac": "pnpm build && electron-builder --mac",
     "dist:win": "pnpm build && electron-builder --win",
     "dist:linux": "pnpm build && electron-builder --linux",
-    "release": "bash scripts/release-local.sh"
+    "release": "bash scripts/release-local.sh",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint . --max-warnings=0"
   },
   "build": {
     "appId": "com.zenbu.desktop",
@@ -102,7 +104,10 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.0",
+    "@zenbu/lint": "workspace:*",
     "electron": "^35.0.0",
-    "electron-builder": "^26.0.0"
+    "electron-builder": "^26.0.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.4.5"
   }
 }

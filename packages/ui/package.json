@@ -7,7 +7,14 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "lint": "eslint . --max-warnings=0"
+  },
   "peerDependencies": {
     "react": ">=19"
+  },
+  "devDependencies": {
+    "@zenbu/lint": "workspace:*",
+    "eslint": "^9.0.0"
   }
 }

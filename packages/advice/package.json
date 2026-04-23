@@ -10,6 +10,10 @@
     "./node": "./src/node.ts",
     "./node-loader": "./src/node-loader.ts"
   },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint . --max-warnings=0"
+  },
   "dependencies": {
     "@babel/core": "^7.26.0",
     "@babel/parser": "^7.26.0",
@@ -19,6 +23,9 @@
   "devDependencies": {
     "@types/babel__core": "^7.20.5",
     "@types/babel__traverse": "^7.20.6",
+    "@zenbu/lint": "workspace:*",
+    "eslint": "^9.0.0",
+    "typescript": "^5.4.5",
     "vite": "^6.3.0",
     "vitest": "^3.1.1"
   }

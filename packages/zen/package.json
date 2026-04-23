@@ -7,6 +7,10 @@
     "zen": "./src/bin.ts"
   },
   "main": "src/bin.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.ci.json",
+    "lint": "eslint . --max-warnings=0"
+  },
   "dependencies": {
     "@zenbu/kyju": "workspace:*",
     "@zenbu/zenrpc": "workspace:*",
@@ -14,6 +18,8 @@
   },
   "devDependencies": {
     "@types/bun": "^1.3.12",
+    "@zenbu/lint": "workspace:*",
+    "eslint": "^9.0.0",
     "typescript": "^5.0.0"
   }
 }

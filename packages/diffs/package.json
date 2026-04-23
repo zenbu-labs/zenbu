@@ -8,6 +8,10 @@
     ".": "./src/index.ts",
     "./react": "./src/react/index.ts"
   },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint . --max-warnings=0"
+  },
   "peerDependencies": {
     "react": ">=19"
   },
@@ -18,6 +22,8 @@
   "devDependencies": {
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@zenbu/lint": "workspace:*",
+    "eslint": "^9.0.0",
     "typescript": "^5.4.5"
   }
 }

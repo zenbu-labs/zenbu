@@ -6,13 +6,16 @@
   "main": "src/index.ts",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.typetest.json"
+    "typecheck": "tsc --noEmit -p tsconfig.typetest.json",
+    "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
     "effect": "catalog:",
     "nanoid": "^5.1.6"
   },
   "devDependencies": {
+    "@zenbu/lint": "workspace:*",
+    "eslint": "^9.0.0",
     "type-testing": "^0.2.0",
     "typescript": "^5.4.5",
     "vitest": "^3.2.4"

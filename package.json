@@ -4,7 +4,10 @@
   "type": "module",
   "scripts": {
     "start": "pnpm --filter @zenbu/kernel start",
-    "typecheck": "pnpm -r run typecheck"
+    "typecheck": "pnpm -r --no-bail run typecheck",
+    "lint": "pnpm -r --no-bail run lint",
+    "check:ts-ignores": "bash scripts/check-ts-ignores.sh",
+    "ci": "pnpm run typecheck && pnpm run lint && pnpm run check:ts-ignores"
   },
   "dependencies": {
     "@zenbu/advice": "workspace:*"

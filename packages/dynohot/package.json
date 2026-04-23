@@ -23,7 +23,8 @@
 	"scripts": {
 		"lint": "eslint --max-warnings=0 --report-unused-disable-directives .",
 		"prepare": "rm -rf dist && tsc -b",
-		"test": "node --no-warnings --experimental-vm-modules --enable-source-maps --test-reporter=spec --test 'dist/__tests__/**/*.js'"
+		"test": "node --no-warnings --experimental-vm-modules --enable-source-maps --test-reporter=spec --test 'dist/__tests__/**/*.js'",
+		"typecheck": "tsc --noEmit -p tsconfig.json"
 	},
 	"dependencies": {
 		"@babel/core": "^7.26.9",

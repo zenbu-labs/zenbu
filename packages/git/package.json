@@ -9,10 +9,14 @@
   },
   "scripts": {
     "seed": "tsx scripts/seed-test-repo.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint . --max-warnings=0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@zenbu/lint": "workspace:*",
+    "eslint": "^9.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.4.5",
     "vitest": "^4.1.3"

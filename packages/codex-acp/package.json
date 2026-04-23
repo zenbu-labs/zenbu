@@ -7,7 +7,9 @@
     "codex-acp": "src/index.ts"
   },
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.16.1",
@@ -17,7 +19,9 @@
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
-    "vitest": "^3.1.1",
-    "typescript": "^5.4.5"
+    "@zenbu/lint": "workspace:*",
+    "eslint": "^9.0.0",
+    "typescript": "^5.4.5",
+    "vitest": "^3.1.1"
   }
 }
