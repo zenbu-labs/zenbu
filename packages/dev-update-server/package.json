@@ -1,0 +1,13 @@
+{
+  "name": "@zenbu/dev-update-server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "dev-update-server": "./src/index.mjs"
+  },
+  "main": "src/index.mjs",
+  "scripts": {
+    "start": "node src/index.mjs"
+  }
+}

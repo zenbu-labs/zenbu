@@ -5,9 +5,7 @@ import { pathToFileURL } from "node:url"
 
 const MONOREPO = path.join(os.homedir(), ".zenbu", "plugins", "zenbu")
 const PACKAGES = path.join(MONOREPO, "packages")
-// testbu is temporary will migrate to fully zenbu soon
-const TESTBU_ALIAS = "@testbu/"
-const ZENBU_ALIAS = "@zenbu/"
+const ZENBU_ALIAS = "#zenbu/"
 
 const LOADER_NAME = "alias-loader"
 let tracePort = null
@@ -42,12 +40,6 @@ function resolveToFile(resolved) {
 }
 
 function resolveImpl(specifier, context, nextResolve) {
-  if (specifier.startsWith(TESTBU_ALIAS)) {
-    const rest = specifier.slice(TESTBU_ALIAS.length)
-    const filePath = resolveToFile(path.resolve(PACKAGES, rest))
-    return { url: pathToFileURL(filePath).href, shortCircuit: true }
-  }
-
   if (specifier.startsWith(ZENBU_ALIAS)) {
     const rest = specifier.slice(ZENBU_ALIAS.length)
     const slashIdx = rest.indexOf("/")

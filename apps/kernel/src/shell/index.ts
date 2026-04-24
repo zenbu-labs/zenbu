@@ -10,6 +10,8 @@ import { readConfig, addPlugin, CONFIG_PATH } from "./config";
 import { initUpdater } from "./updater";
 import { bootstrapEnv } from "./env-bootstrap";
 import { detectPreflight, triggerXcodeCliInstall } from "./preflight";
+import { checkPluginVersions, type Incompatible } from "./version-check";
+import { kernelUpdaterBus } from "../../../../packages/init/shared/kernel-updater-bus";
 import { bootBus } from "../../../../packages/init/shared/boot-bus";
 import {
   trace as traceSpan,
@@ -140,6 +142,129 @@ function needsBootstrapper(): boolean {
   return false;
 }
 
+/**
+ * Show the kernel upgrade preflight INSIDE the existing boot window by
+ * swapping its `loadingView` HTML from `src/boot/index.html` to
+ * `src/setup/preflight-kernel-upgrade.html`. Reusing the same window (rather
+ * than opening a new `BrowserWindow`) avoids a jarring second window on top
+ * of the already-visible boot spinner.
+ *
+ * Drives the existing `electron-updater` pipeline (via `kernelUpdaterBus`)
+ * end-to-end: check → download → install → relaunch.
+ *
+ * IPC shape:
+ *   renderer → main:
+ *     zenbu:kernel-upgrade-start    : begin check + auto-download on available
+ *     zenbu:kernel-upgrade-install  : run quitAndInstall() after downloaded
+ *     zenbu:quit                    : user chose to quit instead
+ *   main → renderer:
+ *     zenbu:kernel-upgrade-context  : { current, incompatible } (on load)
+ *     zenbu:kernel-upgrade-progress : { phase, percent? }
+ *     zenbu:kernel-upgrade-error    : { message }
+ *     zenbu:kernel-upgrade-ready    : () — download done; renderer auto-installs
+ */
+function showKernelUpgradeScreen(
+  bootWindow: BaseWindow,
+  loadingView: WebContentsView,
+  incompatible: Incompatible[],
+): void {
+  // Shrink the boot window to a preflight-sized dialog so the upgrade copy
+  // isn't lost in an 800x900 canvas. Re-center while we're at it.
+  const display = bootWindow.getBounds();
+  const width = 580;
+  const height = 440;
+  bootWindow.setBounds({
+    x: display.x + Math.round((display.width - width) / 2),
+    y: display.y + Math.round((display.height - height) / 2),
+    width,
+    height,
+  });
+
+  loadingView.webContents.loadFile(
+    path.join(app.getAppPath(), "src/setup/preflight-kernel-upgrade.html"),
+  );
+
+  const send = (channel: string, payload: unknown) => {
+    if (loadingView.webContents.isDestroyed()) return;
+    loadingView.webContents.send(channel, payload);
+  };
+
+  // Translate updater bus events into renderer-visible IPC messages.
+  const unsubChecking = kernelUpdaterBus.on("updater.checking", () =>
+    send("zenbu:kernel-upgrade-progress", { phase: "checking" }),
+  );
+  const unsubAvailable = kernelUpdaterBus.on(
+    "updater.available",
+    ({ version }) => {
+      send("zenbu:kernel-upgrade-progress", {
+        phase: "downloading",
+        percent: 0,
+        version,
+      });
+      // Auto-kick the download once an update is confirmed available. The
+      // user already opted in by clicking "Update now".
+      kernelUpdaterBus.emit("updater.cmd.download", { requestId: "upgrade" });
+    },
+  );
+  const unsubNotAvailable = kernelUpdaterBus.on(
+    "updater.not-available",
+    ({ currentVersion }) => {
+      send("zenbu:kernel-upgrade-error", {
+        message: `No newer version available (you're on ${currentVersion}). The installed plugins require a newer kernel that hasn't been released yet.`,
+      });
+    },
+  );
+  const unsubProgress = kernelUpdaterBus.on(
+    "updater.download-progress",
+    ({ percent }) => {
+      send("zenbu:kernel-upgrade-progress", {
+        phase: "downloading",
+        percent: Math.round(percent),
+      });
+    },
+  );
+  const unsubDownloaded = kernelUpdaterBus.on(
+    "updater.downloaded",
+    ({ version }) => {
+      send("zenbu:kernel-upgrade-ready", { version });
+    },
+  );
+  const unsubError = kernelUpdaterBus.on("updater.error", ({ message }) => {
+    send("zenbu:kernel-upgrade-error", { message });
+  });
+
+  // Once the HTML finishes loading, hand it the incompatibility list so it
+  // can render the plugin names + versions.
+  loadingView.webContents.once("did-finish-load", () => {
+    send("zenbu:kernel-upgrade-context", {
+      current: app.getVersion(),
+      incompatible,
+    });
+  });
+
+  // Wire renderer commands.
+  const onStart = () => {
+    kernelUpdaterBus.emit("updater.cmd.check", { requestId: "upgrade" });
+  };
+  const onInstall = () => {
+    kernelUpdaterBus.emit("updater.cmd.install", { requestId: "upgrade" });
+  };
+  ipcMain.on("zenbu:kernel-upgrade-start", onStart);
+  ipcMain.on("zenbu:kernel-upgrade-install", onInstall);
+
+  // Clean up listeners when the boot window closes.
+  bootWindow.on("closed", () => {
+    ipcMain.removeListener("zenbu:kernel-upgrade-start", onStart);
+    ipcMain.removeListener("zenbu:kernel-upgrade-install", onInstall);
+    unsubChecking();
+    unsubAvailable();
+    unsubNotAvailable();
+    unsubProgress();
+    unsubDownloaded();
+    unsubError();
+  });
+}
+
 app.whenReady().then(async () => {
   try {
     // Optional CPU profile for boot-time diagnosis. Enable with
@@ -259,7 +384,12 @@ app.whenReady().then(async () => {
     };
 
     ipcMain.on("zenbu:quit", () => {
+      // app.exit() can hang when electron-updater's ShipIt XPC or a pending
+      // download holds the event loop — the user clicks Quit and nothing
+      // happens. Force-SIGKILL after a brief grace period so the button is
+      // reliable no matter what state the updater is in.
       app.exit(0);
+      setTimeout(() => process.kill(process.pid, "SIGKILL"), 500);
     });
 
     if (preflight.runningFromDmg) {
@@ -497,6 +627,27 @@ app.whenReady().then(async () => {
 
     if (config.plugins.length === 0) {
       console.log("[shell] no plugins to load");
+      return;
+    }
+
+    // Kernel version compatibility gate. Any plugin manifest with a
+    // `requiredVersion` semver range that the current kernel version doesn't
+    // satisfy short-circuits boot and swaps the boot window's content for a
+    // dedicated upgrade screen. Plugins without the field are treated as
+    // compatible.
+    const incompatible = checkPluginVersions(config.plugins, app.getVersion());
+    if (incompatible.length > 0) {
+      console.log(
+        `[shell] kernel ${app.getVersion()} is too old for ${incompatible.length} plugin(s); showing upgrade screen`,
+      );
+      for (const i of incompatible) {
+        console.log(`  - ${i.plugin} requires ${i.required}`);
+      }
+      // initUpdater() is idempotent; we call it here (instead of later) so
+      // the `kernelUpdaterBus` subscriptions in `showKernelUpgradeScreen`
+      // actually receive events.
+      initUpdater();
+      showKernelUpgradeScreen(bootWindow, loadingView, incompatible);
       return;
     }
 

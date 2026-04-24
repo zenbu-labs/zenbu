@@ -30,10 +30,15 @@ export function initUpdater(): void {
   initialized = true
 
   const fake = !app.isPackaged && process.env.ZENBU_FAKE_UPDATER === "1"
+  // `ZENBU_UPDATE_FEED_URL` points the real updater at a local HTTP server
+  // (see `packages/dev-update-server`). When set, the real code path
+  // initializes even in dev mode — lets us end-to-end test the upgrade flow
+  // without code-signing or publishing to GitHub.
+  const localFeedUrl = process.env.ZENBU_UPDATE_FEED_URL
 
-  if (!app.isPackaged && !fake) {
-    // Unpackaged, no fake: silently no-op. Service still loads; DB
-    // stays at status="idle"; banner hides.
+  if (!app.isPackaged && !fake && !localFeedUrl) {
+    // Unpackaged, no fake, no local feed: silently no-op. Service still
+    // loads; DB stays at status="idle"; banner hides.
     return
   }
 
@@ -44,6 +49,19 @@ export function initUpdater(): void {
 
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
+
+  if (localFeedUrl) {
+    autoUpdater.setFeedURL({ provider: "generic", url: localFeedUrl })
+    // Local builds typically have the same (or lower) version than the
+    // running dev app. Let electron-updater install either direction so we
+    // can repeatedly test upgrades.
+    autoUpdater.allowDowngrade = true
+    autoUpdater.disableDifferentialDownload = true
+    // In dev the running app is unsigned, so the new bundle will be too.
+    // electron-updater's macOS path validates that signatures match — both
+    // unsigned is a match (no-op validation). Nothing more needed here.
+    console.log(`[updater] using local feed URL: ${localFeedUrl}`)
+  }
 
   autoUpdater.on("checking-for-update", () => {
     console.log("[updater] checking")

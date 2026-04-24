@@ -1,6 +1,6 @@
-import { connectRpc, type EventProxy, type RouterProxy } from "@zenbu/zenrpc"
+import { connectRpc, type EventProxy, type RouterProxy } from "#zenbu/zenrpc"
 import type { ServiceRouter } from "#registry/services"
-import type { ZenbuEvents } from "@testbu/init/shared/events"
+import type { ZenbuEvents } from "#zenbu/init/shared/events"
 import { readRuntimeConfig, type RuntimeConfig } from "./runtime"
 
 export type CliRpc = RouterProxy<ServiceRouter>

@@ -110,11 +110,11 @@ The shell finds the nearest `tsconfig.json` from the first plugin manifest and p
 
 ### 5. Write Service Files
 
-Service files follow the same pattern as kernel services. Import from the init package using the `@testbu/` alias (resolved at runtime by the alias loader, and at type-check time by `tsconfig.local.json`):
+Service files follow the same pattern as kernel services. Import from the init package using the `#zenbu/` alias (resolved at runtime by the alias loader, and at type-check time by `tsconfig.local.json`):
 
 ```typescript
-import { Service, runtime } from "@testbu/init/src/main/runtime"
-import { DbService } from "@testbu/init/src/main/services/db"
+import { Service, runtime } from "#zenbu/init/src/main/runtime"
+import { DbService } from "#zenbu/init/src/main/services/db"
 
 export class MyPluginService extends Service {
   static key = "my-plugin-service"
@@ -178,8 +178,8 @@ See the `install-plugin` command. The short version: add the absolute path to yo
 A plugin can register views by depending on `ViewRegistryService`. For a view with its own Vite server (not sharing the kernel's core server):
 
 ```typescript
-import { Service, runtime } from "@testbu/init/src/main/runtime"
-import { ViewRegistryService } from "@testbu/init/src/main/services/view-registry"
+import { Service, runtime } from "#zenbu/init/src/main/runtime"
+import { ViewRegistryService } from "#zenbu/init/src/main/services/view-registry"
 
 export class MyViewService extends Service {
   static key = "my-plugin-view"
@@ -199,11 +199,11 @@ export class MyViewService extends Service {
 
 `register()` (not `registerAlias()`) creates a new Vite dev server for this view's source directory.
 
-### Portable Resolution: How `@testbu/` Works
+### Portable Resolution: How `#zenbu/` Works
 
 Plugins are fully portable — they can live anywhere on the filesystem and work on any computer. This is achieved through three resolution layers:
 
-**Main process (services):** The shell's alias loader intercepts `@testbu/*` imports and resolves them to `~/.zenbu/plugins/zenbu/packages/*`. It also intercepts `@zenbu/*` imports and resolves them using each package's `exports` map. No hardcoded paths needed in plugin source.
+**Main process (services):** The shell's alias loader intercepts `#zenbu/*` imports and resolves them to `~/.zenbu/plugins/zenbu/packages/*`. It also intercepts `#zenbu/*` imports and resolves them using each package's `exports` map. No hardcoded paths needed in plugin source.
 
 **Renderer (views):** Each plugin's `vite.config.ts` sets a resolve alias using `os.homedir()`:
 
@@ -216,7 +216,7 @@ const packagesDir = path.join(os.homedir(), ".zenbu", "plugins", "zenbu", "packa
 export default defineConfig({
   resolve: {
     alias: {
-      "@testbu": packagesDir,
+      "@zenbu": packagesDir,
       "@": path.join(packagesDir, "init", "src", "renderer"),
     },
   },
@@ -227,12 +227,12 @@ export default defineConfig({
 
 ```css
 @import "tailwindcss";
-@import "@testbu/init/src/renderer/styles/shadcn.css";
+@import "#zenbu/init/src/renderer/styles/shadcn.css";
 ```
 
 This single import gives you CSS variables, base styles, and Tailwind class scanning for all UI components — the `@source` directives inside `shadcn.css` use relative paths that resolve correctly regardless of where your plugin lives.
 
-**TypeScript (IDE):** `tsconfig.local.json` is gitignored and generated per machine (by `setup.ts` or manually). It maps `@testbu/*` to the local monorepo path for IDE type-checking.
+**TypeScript (IDE):** `tsconfig.local.json` is gitignored and generated per machine (by `setup.ts` or manually). It maps `#zenbu/*` to the local monorepo path for IDE type-checking.
 
 ## Checklist
 
@@ -240,7 +240,7 @@ This single import gives you CSS variables, base styles, and Tailwind class scan
 - [ ] `package.json` at the plugin root
 - [ ] `tsconfig.json` extending `./tsconfig.local.json`
 - [ ] `tsconfig.local.json` (gitignored, generated per machine)
-- [ ] `vite.config.ts` with `@testbu` alias via `os.homedir()` (if plugin has views)
-- [ ] `app.css` importing `@testbu/init/src/renderer/styles/shadcn.css` (if using UI components)
-- [ ] Service files that import from `@testbu/init/...` and call `runtime.register()`
+- [ ] `vite.config.ts` with `@zenbu` alias via `os.homedir()` (if plugin has views)
+- [ ] `app.css` importing `#zenbu/init/src/renderer/styles/shadcn.css` (if using UI components)
+- [ ] Service files that import from `#zenbu/init/...` and call `runtime.register()`
 - [ ] Plugin manifest path added to `~/.zenbu/config.json`

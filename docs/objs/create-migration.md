@@ -41,7 +41,7 @@ Create `packages/init/kyju/NNNN_description.ts` where `NNNN` is the next sequent
 **Declarative (adding fields):**
 
 ```typescript
-import type { KyjuMigration } from "@zenbu/kyju/migrations"
+import type { KyjuMigration } from "#zenbu/kyju/migrations"
 
 const migration: KyjuMigration = {
   version: 4,
@@ -56,7 +56,7 @@ export default migration
 **Custom (transforming data):**
 
 ```typescript
-import type { KyjuMigration } from "@zenbu/kyju/migrations"
+import type { KyjuMigration } from "#zenbu/kyju/migrations"
 
 const migration: KyjuMigration = {
   version: 4,
@@ -80,7 +80,7 @@ export default migration
 **Combined:**
 
 ```typescript
-import type { KyjuMigration } from "@zenbu/kyju/migrations"
+import type { KyjuMigration } from "#zenbu/kyju/migrations"
 
 const migration: KyjuMigration = {
   version: 4,
@@ -108,7 +108,7 @@ import m0 from "./0000_initial"
 import m1 from "./0001_add_agent_id_and_mock_acp"
 import m2 from "./0002_add_view_registry"
 import m3 from "./0003_my_new_migration"
-import type { KyjuMigration } from "@zenbu/kyju/migrations"
+import type { KyjuMigration } from "#zenbu/kyju/migrations"
 
 const noop: KyjuMigration = { version: 0 }
 
@@ -129,7 +129,7 @@ pnpm kyju generate --name add_my_field
 This requires `packages/init/kyju.config.ts`:
 
 ```typescript
-import { defineConfig } from "@zenbu/kyju/config"
+import { defineConfig } from "#zenbu/kyju/config"
 
 export default defineConfig({
   schema: "./shared/schema/index.ts",
@@ -178,7 +178,7 @@ const migration: KyjuMigration = {
       agents.push({
         id: "mock-acp",
         name: "Mock Agent",
-        startCommand: "npx tsx node_modules/@zenbu/mock-acp/src/index.ts",
+        startCommand: "npx tsx node_modules/#zenbu/mock-acp/src/index.ts",
       })
     }
     data.agents = agents

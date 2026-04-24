@@ -71,7 +71,7 @@ agents: f.array(zod.object({
 Create a migration that inserts the agent into existing databases:
 
 ```typescript
-import type { KyjuMigration } from "@zenbu/kyju/migrations"
+import type { KyjuMigration } from "#zenbu/kyju/migrations"
 
 const migration: KyjuMigration = {
   version: N,

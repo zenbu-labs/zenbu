@@ -12,7 +12,7 @@ Kyju is a reactive SQLite-backed database designed for cross-process state. The 
 
 ### The Schema
 
-The schema is defined in `packages/init/shared/schema/index.ts` using `createSchema` and the `f` helper from `@zenbu/kyju/schema`. The `f` proxy wraps Zod types and adds Kyju-specific field descriptors.
+The schema is defined in `packages/init/shared/schema/index.ts` using `createSchema` and the `f` helper from `#zenbu/kyju/schema`. The `f` proxy wraps Zod types and adds Kyju-specific field descriptors.
 
 ### Field Types
 
@@ -39,7 +39,7 @@ Edit `packages/init/shared/schema/index.ts`:
 
 ```typescript
 import zod from "zod"
-import { createSchema, f, type InferSchema } from "@zenbu/kyju/schema"
+import { createSchema, f, type InferSchema } from "#zenbu/kyju/schema"
 
 export const appSchema = createSchema({
   // ... existing fields ...
@@ -67,7 +67,7 @@ Create a new migration file in `packages/init/kyju/`. See the `create-migration`
 Create `packages/init/kyju/NNNN_add_my_field.ts`:
 
 ```typescript
-import type { KyjuMigration } from "@zenbu/kyju/migrations"
+import type { KyjuMigration } from "#zenbu/kyju/migrations"
 
 const migration: KyjuMigration = {
   version: N,

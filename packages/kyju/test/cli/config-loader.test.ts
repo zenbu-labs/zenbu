@@ -39,7 +39,7 @@ describe("CLI config loader", () => {
     fs.writeFileSync(
       path.join(dir, "schema.ts"),
       [
-        'import { createSchema, f } from "@zenbu/kyju/schema";',
+        'import { createSchema, f } from "#zenbu/kyju/schema";',
         'import { defaultCount } from "local-dep";',
         "export const schema = createSchema({ count: f.number().default(defaultCount) });",
         "",
@@ -50,7 +50,7 @@ describe("CLI config loader", () => {
     expect((schema.shape as any).count._defaultValue).toBe(7);
   });
 
-  it("resolves @testbu directory imports to index.ts", () => {
+  it("resolves @zenbu directory imports to index.ts", () => {
     const root = tmpPluginDir("testbu-dir");
     cleanups.push(root);
 
@@ -73,8 +73,8 @@ describe("CLI config loader", () => {
     fs.writeFileSync(
       path.join(pluginDir, "src", "schema.ts"),
       [
-        'import { createSchema, f } from "@zenbu/kyju/schema";',
-        'import { SHARED_VALUE } from "@testbu/shared-lib";',
+        'import { createSchema, f } from "#zenbu/kyju/schema";',
+        'import { SHARED_VALUE } from "#zenbu/shared-lib";',
         "export const schema = createSchema({ value: f.number().default(SHARED_VALUE) });",
         "",
       ].join("\n"),

@@ -111,12 +111,12 @@ function registerHostResolveHook() {
     isMain: boolean,
     options: any,
   ) {
-    if (request.startsWith("@testbu/")) {
+    if (request.startsWith("#zenbu/")) {
       const packagesDir =
         currentHostPackagesDir ?? findHostPackagesDir(process.cwd());
       const resolved = path.resolve(
         packagesDir,
-        request.slice("@testbu/".length),
+        request.slice("#zenbu/".length),
       );
       if (path.extname(resolved)) {
         return orig.call(this, resolved, parent, isMain, options);

@@ -7,6 +7,17 @@ export type Manifest = {
   schema?: string
   migrations?: string
   setup?: { script?: string; version?: number }
+  /**
+   * Minimum kernel version required, as a semver range.
+   *   "0.2.0"    — any kernel at or above 0.2.0 (bare version is a floor)
+   *   ">=0.2.0"  — explicit form of the same
+   *   ">=0.2 <1" — bounded range
+   *
+   * When set, the kernel refuses to boot with this plugin configured if its
+   * own version doesn't satisfy the range. Users see a dedicated preflight
+   * window with a one-click upgrade flow (fed by electron-updater).
+   */
+  requiredVersion?: string
 }
 
 /** Walk up from `from` until we hit a `zenbu.plugin.json`. */

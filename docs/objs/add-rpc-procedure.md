@@ -2,7 +2,7 @@
 
 ## What You're Doing
 
-Adding a new remote procedure that the frontend (renderer process) can call on the backend (main process). Zenbu uses a typed RPC layer (`@zenbu/zenrpc`) over WebSocket, and types flow automatically from server to client.
+Adding a new remote procedure that the frontend (renderer process) can call on the backend (main process). Zenbu uses a typed RPC layer (`#zenbu/zenrpc`) over WebSocket, and types flow automatically from server to client.
 
 ## Background
 
@@ -12,7 +12,7 @@ A single WebSocket connection multiplexes two channels:
 - `{ ch: "rpc", data }` — RPC requests/responses
 - `{ ch: "db", data }` — Kyju database replication
 
-The RPC server lives in `RpcService`. It wraps `@zenbu/zenrpc`'s `createServer`, which dispatches incoming requests to the **router**—a plain object whose leaf values are functions.
+The RPC server lives in `RpcService`. It wraps `#zenbu/zenrpc`'s `createServer`, which dispatches incoming requests to the **router**—a plain object whose leaf values are functions.
 
 The router is defined in `packages/init/src/main/routers/main-router.ts`. `RouterService` passes it to `RpcService` via `setRouter()`.
 

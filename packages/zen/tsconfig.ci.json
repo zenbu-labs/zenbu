@@ -10,7 +10,7 @@
     "skipLibCheck": true,
     "types": ["bun"],
     "paths": {
-      "@testbu/*": ["../*"]
+      "#zenbu/*": ["../*"]
     }
   },
   "include": ["src"]

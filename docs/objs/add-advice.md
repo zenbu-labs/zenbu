@@ -63,7 +63,7 @@ If unsure, inspect the transformed source. In browser devtools, the source map p
 ### 2. Import the Advice Runtime
 
 ```typescript
-import { advise, replace } from "@zenbu/advice/runtime"
+import { advise, replace } from "#zenbu/advice/runtime"
 ```
 
 ### 3. Replace a Function

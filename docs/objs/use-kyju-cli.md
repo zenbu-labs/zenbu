@@ -18,7 +18,7 @@ This path is set in `packages/init/src/main/services/db.ts` as `path.join(os.tmp
 
 ### The CLI Binary
 
-The `kyju` binary is provided by the `@zenbu/kyju` package. The kernel's `package.json` has a script `"kyju": "kyju"` for convenience.
+The `kyju` binary is provided by the `#zenbu/kyju` package. The kernel's `package.json` has a script `"kyju": "kyju"` for convenience.
 
 ## Commands
 
@@ -89,7 +89,7 @@ pnpm kyju generate --name my_migration_name
 This requires `kyju.config.ts` in the current directory:
 
 ```typescript
-import { defineConfig } from "@zenbu/kyju/config"
+import { defineConfig } from "#zenbu/kyju/config"
 
 export default defineConfig({
   schema: "./shared/schema/index.ts",

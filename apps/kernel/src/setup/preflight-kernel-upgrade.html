@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Update Zenbu</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <style>
+    /* Override the shared `.container.verbose` to be drag-able as a whole;
+     * only interactive regions are carved out as no-drag. */
+    .container.verbose {
+      -webkit-app-region: drag;
+      padding: 56px 40px 28px 40px;
+      gap: 0;
+    }
+    button, .plugin-row, .progress, .error, a { -webkit-app-region: no-drag; }
+
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.015em;
+      line-height: 1.1;
+      margin: 0 0 14px 0;
+    }
+    .tagline {
+      font-size: 14px;
+      color: var(--fg);
+      margin: 0 0 4px 0;
+    }
+    .current-version {
+      font-size: 13px;
+      color: var(--muted-fg);
+      margin: 0 0 22px 0;
+    }
+
+    .plugin-list {
+      border: 1px solid var(--border);
+      border-radius: calc(var(--radius) - 2px);
+      overflow: hidden;
+      margin: 0 0 24px 0;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+    .plugin-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: var(--fg);
+    }
+    .plugin-row + .plugin-row { border-top: 1px solid var(--border); }
+    .plugin-row .name { font-weight: 500; }
+    .plugin-row .req  { color: var(--muted-fg); }
+
+    .progress {
+      margin: 0 0 20px 0;
+      font-size: 13px;
+      color: var(--muted-fg);
+    }
+    .progress-bar {
+      margin-top: 8px;
+      height: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .progress-bar .fill {
+      height: 100%;
+      background: var(--primary);
+      width: 0%;
+      transition: width 0.15s ease;
+    }
+
+    .error {
+      color: var(--fg);
+      padding: 10px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: calc(var(--radius) - 2px);
+      font-size: 13px;
+      margin: 0 0 20px 0;
+      line-height: 1.5;
+    }
+    .error a {
+      color: var(--fg);
+      text-decoration: underline;
+      cursor: pointer;
+    }
+    .error a:hover { color: var(--primary); }
+
+    .hidden { display: none !important; }
+
+    .footer {
+      margin-top: auto;
+      gap: 10px;
+    }
+    button {
+      padding: 8px 18px;
+      font-size: 13px;
+      border-radius: calc(var(--radius) - 2px);
+    }
+  </style>
+</head>
+<body>
+  <div class="chrome"></div>
+  <div class="container verbose">
+    <h1>Update Zenbu</h1>
+    <p class="tagline" id="tagline">A plugin requires a newer version of Zenbu to continue.</p>
+    <p class="current-version" id="currentVersion">Current version: …</p>
+
+    <div class="plugin-list" id="pluginList"></div>
+
+    <div class="progress hidden" id="progress">
+      <div id="progressLabel">Preparing…</div>
+      <div class="progress-bar"><div class="fill" id="progressFill"></div></div>
+    </div>
+
+    <div class="error hidden" id="error">
+      The automatic update ran into an issue. Please download the latest release from
+      <a href="#" id="downloadLink">zenbu.dev/download</a>.
+    </div>
+
+    <div class="footer">
+      <button class="secondary" id="quitBtn">Quit</button>
+      <button id="updateBtn">Update now</button>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require("electron")
+
+    const currentVersionEl = document.getElementById("currentVersion")
+    const listEl = document.getElementById("pluginList")
+    const progressEl = document.getElementById("progress")
+    const progressLabelEl = document.getElementById("progressLabel")
+    const progressFillEl = document.getElementById("progressFill")
+    const errorEl = document.getElementById("error")
+    const updateBtn = document.getElementById("updateBtn")
+    const quitBtn = document.getElementById("quitBtn")
+
+    // Convert a semver range into a short, user-facing version requirement:
+    //   ">=0.1.0"  → "0.1.0+"
+    //   "0.1.0"    → "0.1.0+" (bare is treated as a floor by our checker)
+    //   ">0.1.0"   → "0.1.0+"   (close enough for display)
+    //   "<1.0.0"   → "before 1.0.0"
+    //   "0.1 - 0.3" → "0.1 – 0.3"
+    //   anything else → unchanged
+    function formatRequired(range) {
+      const t = String(range).trim()
+      const lt = /^<=?\s*(.+)$/.exec(t)
+      if (lt) return `before ${lt[1]}`
+      const ge = /^>=?\s*(.+)$/.exec(t)
+      if (ge) return `${ge[1]}+`
+      const hyphen = /^(\S+)\s*-\s*(\S+)$/.exec(t)
+      if (hyphen) return `${hyphen[1]} – ${hyphen[2]}`
+      if (/^\d+\.\d+/.test(t)) return `${t}+`
+      return t
+    }
+
+    ipcRenderer.on("zenbu:kernel-upgrade-context", (_e, payload) => {
+      currentVersionEl.textContent = `Current version: ${payload.current}`
+      listEl.innerHTML = payload.incompatible
+        .map((i) => `
+          <div class="plugin-row">
+            <span class="name">${escapeHtml(i.plugin)}</span>
+            <span class="req">Requires ${escapeHtml(formatRequired(i.required))}</span>
+          </div>
+        `).join("")
+    })
+
+    ipcRenderer.on("zenbu:kernel-upgrade-progress", (_e, { phase, percent }) => {
+      errorEl.classList.add("hidden")
+      progressEl.classList.remove("hidden")
+      if (phase === "checking") {
+        progressLabelEl.textContent = "Checking for updates…"
+        progressFillEl.style.width = "0%"
+      } else if (phase === "downloading") {
+        const p = typeof percent === "number" ? percent : 0
+        progressLabelEl.textContent = `Downloading… ${p}%`
+        progressFillEl.style.width = p + "%"
+      }
+    })
+
+    ipcRenderer.on("zenbu:kernel-upgrade-ready", (_e, { version }) => {
+      progressLabelEl.textContent = `Installing ${version}…`
+      progressFillEl.style.width = "100%"
+      updateBtn.disabled = true
+      quitBtn.disabled = true
+      // Give the user a brief moment to see the "Installing" state before
+      // Electron relaunches.
+      setTimeout(() => {
+        ipcRenderer.send("zenbu:kernel-upgrade-install")
+      }, 400)
+    })
+
+    ipcRenderer.on("zenbu:kernel-upgrade-error", (_e, { message }) => {
+      // Raw error (code signature, network 404, etc.) goes to console; users
+      // see a friendly fallback that points them at the download page.
+      console.warn("[kernel-upgrade] updater error:", message)
+      progressEl.classList.add("hidden")
+      errorEl.classList.remove("hidden")
+      updateBtn.disabled = false
+      updateBtn.textContent = "Try again"
+    })
+
+    document.getElementById("downloadLink").addEventListener("click", (e) => {
+      e.preventDefault()
+      require("electron").shell.openExternal("https://zenbu.dev/download")
+    })
+
+    updateBtn.addEventListener("click", () => {
+      updateBtn.disabled = true
+      errorEl.classList.add("hidden")
+      ipcRenderer.send("zenbu:kernel-upgrade-start")
+    })
+
+    quitBtn.addEventListener("click", () => {
+      ipcRenderer.send("zenbu:quit")
+    })
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+    }
+  </script>
+</body>
+</html>

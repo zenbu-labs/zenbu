@@ -165,3 +165,6 @@ apps/kernel/.node_modules.dev/
 
 # Perf experiment output
 **/perf-experiment-out/
+
+apps/kernel/scripts/perf-experiment-out
+apps/kernel/releases

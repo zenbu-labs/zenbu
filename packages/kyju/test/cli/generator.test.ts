@@ -51,8 +51,8 @@ describe("generator", () => {
 
     const migContent = fs.readFileSync(result.migrationPath, "utf-8");
     expect(migContent).toContain("KyjuMigration");
-    expect(migContent).not.toContain("@zenbu/kyju/migrations");
-    expect(migContent).not.toContain("@testbu/kyju");
+    expect(migContent).not.toContain("#zenbu/kyju/migrations");
+    expect(migContent).not.toContain("#zenbu/kyju");
     expect(migContent).toContain('"add"');
     expect(migContent).toContain("version: 1");
 

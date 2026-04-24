@@ -8,7 +8,7 @@ Accessing the Kyju database from a service running in Electron's main (Node.js) 
 
 ### Where the Database Is
 
-`DbService` (`packages/init/src/main/services/db.ts`) creates the database at `/tmp/zenbu-desktop-db` using `createDb` from `@zenbu/kyju`. It exposes `this.db.effectClient` as `this.client` (a getter).
+`DbService` (`packages/init/src/main/services/db.ts`) creates the database at `/tmp/zenbu-desktop-db` using `createDb` from `#zenbu/kyju`. It exposes `this.db.effectClient` as `this.client` (a getter).
 
 ### The Client API
 

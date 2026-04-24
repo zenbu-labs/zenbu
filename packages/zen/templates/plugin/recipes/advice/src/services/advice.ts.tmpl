@@ -1,7 +1,7 @@
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { Service, runtime } from "@testbu/init/src/main/runtime"
-import { registerAdvice } from "@testbu/init/src/main/services/advice-config"
+import { Service, runtime } from "#zenbu/init/src/main/runtime"
+import { registerAdvice } from "#zenbu/init/src/main/services/advice-config"
 
 const WRAPPER_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
