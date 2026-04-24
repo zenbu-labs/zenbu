@@ -4,7 +4,13 @@ import { fileURLToPath } from "node:url"
 
 const includeRe = /\.[jt]sx?$/
 const excludeRe = /node_modules|packages\/advice\//
-const rootDir = process.cwd().replace(/\\/g, "/").replace(/\/$/, "")
+// Transform root. Anchored to the kernel's project root via env var (set by
+// apps/kernel/src/shell/index.ts) instead of process.cwd(), so the advice
+// transform doesn't spill into third-party plugin files when the app is
+// launched from an ancestor dir (e.g. `zen --blocking` run from `~`).
+const rootDir = (process.env.ZENBU_ADVICE_ROOT ?? process.cwd())
+  .replace(/\\/g, "/")
+  .replace(/\/$/, "")
 
 interface ResolveContext {
   conditions: string[]
