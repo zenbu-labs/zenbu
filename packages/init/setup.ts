@@ -310,7 +310,7 @@ async function ensureDepsInstalled(): Promise<void> {
   // CI=true makes pnpm non-interactive; otherwise it prompts on node_modules
   // divergence and aborts when there's no TTY.
   const pnpmBin = path.join(BIN_DIR, "pnpm")
-  const proc = Bun.spawn([pnpmBin, "install", "--filter=!#zenbu/kernel"], {
+  const proc = Bun.spawn([pnpmBin, "install", "--filter=!@zenbu/kernel"], {
     cwd: REPO_DIR,
     env: { ...process.env, CI: "true" },
     stdio: ["ignore", "inherit", "inherit"],
