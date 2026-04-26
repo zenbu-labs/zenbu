@@ -856,7 +856,7 @@ function KernelAppVersionCard() {
   useEffect(() => {
     (async () => {
       try {
-        const v: string = await (rpc as any).kernelUpdater.getCurrentVersion();
+        const v: string = await rpc.kernelUpdater.getCurrentVersion();
         setCurrentVersion(v);
       } catch {}
     })();
@@ -865,7 +865,7 @@ function KernelAppVersionCard() {
   const check = useCallback(async () => {
     setBusy("check");
     try {
-      await (rpc as any).kernelUpdater.checkForUpdates();
+      await rpc.kernelUpdater.checkForUpdates();
     } finally {
       setBusy(null);
     }
@@ -874,7 +874,7 @@ function KernelAppVersionCard() {
   const download = useCallback(async () => {
     setBusy("download");
     try {
-      await (rpc as any).kernelUpdater.downloadUpdate();
+      await rpc.kernelUpdater.downloadUpdate();
     } finally {
       setBusy(null);
     }
@@ -883,7 +883,7 @@ function KernelAppVersionCard() {
   const install = useCallback(async () => {
     setBusy("install");
     try {
-      await (rpc as any).kernelUpdater.quitAndInstall();
+      await rpc.kernelUpdater.quitAndInstall();
     } catch {
       // Transport dies during quit.
     } finally {
@@ -894,7 +894,7 @@ function KernelAppVersionCard() {
   const dismiss = useCallback(async () => {
     setBusy("dismiss");
     try {
-      await (rpc as any).kernelUpdater.dismissAvailable();
+      await rpc.kernelUpdater.dismissAvailable();
     } finally {
       setBusy(null);
     }
@@ -1205,9 +1205,7 @@ function PullAndInstallButton({
     setPending(true);
     setResult(null);
     try {
-      const r: PullAndInstallResult = await (
-        rpc as any
-      ).gitUpdates.pullAndInstall({
+      const r: PullAndInstallResult = await rpc.gitUpdates.pullAndInstall({
         plugin: pluginName,
       });
       setResult(r);
@@ -2289,7 +2287,7 @@ function RegistrySection() {
     async (entry: RegistryEntry, nextEnabled: boolean) => {
       if (!entry.manifestPath) return;
       try {
-        await (rpc as any).installer.togglePlugin(
+        await rpc.installer.togglePlugin(
           entry.manifestPath,
           nextEnabled,
         );

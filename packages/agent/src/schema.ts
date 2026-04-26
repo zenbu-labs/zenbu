@@ -170,6 +170,7 @@ const agentRecordBase = {
   status: zod.enum(["idle", "streaming"]).default("idle"),
   processState: zod.string().optional(),
   metadata: zod.record(zod.string(), zod.unknown()).optional(),
+  workspaceId: zod.string().optional(),
   model: zod.string().optional(),
   thinkingLevel: zod.string().optional(),
   mode: zod.string().optional(),

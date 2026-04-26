@@ -29,7 +29,7 @@ export function KernelBinaryUpdateBanner() {
   const download = useCallback(async () => {
     setBusy("download");
     try {
-      await (rpc as any).kernelUpdater.downloadUpdate();
+      await rpc.kernelUpdater.downloadUpdate();
     } catch (err) {
       console.error("[kernel-update-banner] download failed:", err);
     } finally {
@@ -40,7 +40,7 @@ export function KernelBinaryUpdateBanner() {
   const install = useCallback(async () => {
     setBusy("install");
     try {
-      await (rpc as any).kernelUpdater.quitAndInstall();
+      await rpc.kernelUpdater.quitAndInstall();
     } catch {
       // Transport may die as the app quits; swallow.
     } finally {
@@ -50,7 +50,7 @@ export function KernelBinaryUpdateBanner() {
 
   const dismiss = useCallback(async () => {
     try {
-      await (rpc as any).kernelUpdater.dismissAvailable();
+      await rpc.kernelUpdater.dismissAvailable();
     } catch (err) {
       console.error("[kernel-update-banner] dismiss failed:", err);
     }
@@ -59,7 +59,7 @@ export function KernelBinaryUpdateBanner() {
   const retry = useCallback(async () => {
     setBusy("check");
     try {
-      await (rpc as any).kernelUpdater.checkForUpdates();
+      await rpc.kernelUpdater.checkForUpdates();
     } catch (err) {
       console.error("[kernel-update-banner] retry failed:", err);
     } finally {

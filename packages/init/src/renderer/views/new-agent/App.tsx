@@ -54,6 +54,7 @@ function NewAgentScreen() {
         windowId,
         sentinelTabId,
         cwd,
+        workspaceId: activeWorkspaceId ?? undefined,
       });
 
       // Write the user_prompt to the agent's event log immediately so chat

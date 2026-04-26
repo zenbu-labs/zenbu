@@ -31,7 +31,7 @@ export function RegistryDetail({
   onPullUpdates: (e: PluginEntry) => void
   onUninstall: (e: PluginEntry, deleteFiles: boolean) => void
 }) {
-  const rpc = useRpc() as any
+  const rpc = useRpc()
   const [menuOpen, setMenuOpen] = useState(false)
   const [showUninstall, setShowUninstall] = useState(false)
 

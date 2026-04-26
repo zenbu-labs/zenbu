@@ -6,6 +6,46 @@ import { Service, runtime } from "../runtime"
 import { DbService } from "./db"
 import { WorkspaceContextService } from "./workspace-context"
 
+function parseJsonc(str: string): unknown {
+  let result = ""
+  let i = 0
+  while (i < str.length) {
+    if (str[i] === '"') {
+      let j = i + 1
+      while (j < str.length) {
+        if (str[j] === "\\") { j += 2 }
+        else if (str[j] === '"') { j++; break }
+        else { j++ }
+      }
+      result += str.slice(i, j)
+      i = j
+    } else if (str[i] === "/" && str[i + 1] === "/") {
+      i += 2
+      while (i < str.length && str[i] !== "\n") i++
+    } else if (str[i] === "/" && str[i + 1] === "*") {
+      i += 2
+      while (i < str.length && !(str[i] === "*" && str[i + 1] === "/")) i++
+      i += 2
+    } else {
+      result += str[i]
+      i++
+    }
+  }
+  return JSON.parse(result.replace(/,\s*([\]}])/g, "$1"))
+}
+
+function resolveWorkspaceConfigPath(zenbuDir: string): string | null {
+  const jsonc = path.join(zenbuDir, "config.jsonc")
+  try {
+    if (fs.statSync(jsonc).isFile()) return jsonc
+  } catch {}
+  const json = path.join(zenbuDir, "config.json")
+  try {
+    if (fs.statSync(json).isFile()) return json
+  } catch {}
+  return null
+}
+
 export class WorkspaceService extends Service {
   static key = "workspace"
   static deps = { db: DbService }
@@ -192,26 +232,18 @@ export class WorkspaceService extends Service {
     }
     for (const cwd of cwds) {
       const zenbuDir = path.join(cwd, ".zenbu")
-      let stat: fs.Stats | null = null
-      try {
-        stat = fs.statSync(zenbuDir)
-      } catch {
-        continue
-      }
-      if (!stat || !stat.isDirectory()) continue
-
-      const directManifest = path.join(zenbuDir, "zenbu.plugin.json")
-      try {
-        if (fs.statSync(directManifest).isFile()) push(directManifest)
-      } catch {}
+      const configPath = resolveWorkspaceConfigPath(zenbuDir)
+      if (!configPath) continue
 
       try {
-        for (const entry of fs.readdirSync(zenbuDir, { withFileTypes: true })) {
-          if (!entry.isDirectory()) continue
-          const childManifest = path.join(zenbuDir, entry.name, "zenbu.plugin.json")
-          try {
-            if (fs.statSync(childManifest).isFile()) push(childManifest)
-          } catch {}
+        const raw = fs.readFileSync(configPath, "utf8")
+        const config = parseJsonc(raw)
+        if (!config || typeof config !== "object") continue
+        const plugins = (config as any).plugins
+        if (!Array.isArray(plugins)) continue
+        for (const entry of plugins) {
+          if (typeof entry !== "string") continue
+          push(path.resolve(zenbuDir, entry))
         }
       } catch {}
     }

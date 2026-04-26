@@ -43,7 +43,7 @@ export function CliRelaunchModal() {
       const requestId = pending.requestId;
       setPending(null);
       try {
-        await (rpc as any).cli.confirmRelaunch(requestId, decision);
+        await rpc.cli.confirmRelaunch(requestId, decision);
       } catch {}
     },
     [rpc, pending],

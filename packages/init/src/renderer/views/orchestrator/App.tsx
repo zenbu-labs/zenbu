@@ -829,6 +829,7 @@ function OrchestratorContent() {
         metadata: {
           ...(newAgentCwd ? { cwd: newAgentCwd } : {}),
         },
+        workspaceId: activeWorkspaceId ?? undefined,
         eventLog: makeCollection({
           collectionId: nanoid(),
           debugName: "eventLog",

@@ -63,7 +63,7 @@ export type Activity = {
 export type DiscoverKey = "all" | "installed" | "updates" | "local"
 
 function PluginsScreen() {
-  const rpc = useRpc() as any
+  const rpc = useRpc()
 
   const [listing, setListing] = useState<{
     source: "remote" | "local"

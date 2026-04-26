@@ -413,8 +413,14 @@ edits to `packages/zen/src/**/*.ts` apply on the next invocation.
 - **No module-level mutable state in services.** Use `setup()`. Hot
   reload re-runs `evaluate()` on the same instance — module-level
   state survives but won't reflect the new code.
-- **Avoid `as any`.** The DB section types and RPC types are
-  generated; cast through proper types or fix the schema.
+- **Never use `as any` on RPC calls or DB reads.** The RPC types
+  (`ServiceRouter`) and DB types (`DbSections`) are fully generated
+  by `zen link`. If a type error appears after changing a service's
+  public method signature, the fix is to run `zen link` to regenerate
+  `~/.zenbu/registry/services.ts` — not to cast. The renderer's
+  `useRpc()` returns `RouterProxy<ServiceRouter>` which statically
+  types every `rpc.<service>.<method>(args)` call. Adding `as any`
+  defeats the entire type pipeline and will not be accepted.
 - **Comments and commit messages are instructions for future merge
   agents.** Pull conflicts will be resolved by an LLM reading the
   history; explicit intent matters.

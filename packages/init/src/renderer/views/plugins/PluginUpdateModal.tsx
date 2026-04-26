@@ -72,7 +72,7 @@ export function PluginUpdateModal({
     setInstallError(null)
     setInstallProgress([])
     try {
-      const r: CommitResult = await (rpc as any).gitUpdates.commitPluginUpdate({
+      const r: CommitResult = await rpc.gitUpdates.commitPluginUpdate({
         plugin: pending.plugin,
         version: pending.version,
       })
@@ -90,7 +90,7 @@ export function PluginUpdateModal({
   const dismiss = useCallback(async () => {
     if (!pending) return
     try {
-      await (rpc as any).gitUpdates.rollbackPluginUpdate({
+      await rpc.gitUpdates.rollbackPluginUpdate({
         plugin: pending.plugin,
       })
     } catch (err) {

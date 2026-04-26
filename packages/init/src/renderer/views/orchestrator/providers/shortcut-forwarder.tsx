@@ -163,7 +163,7 @@ export function ShortcutForwarderProvider({
       console.log(
         `[shortcut-forwarder] match "${binding.id}" scope=${binding.scope} paneId=${paneId}`,
       );
-      void (rpc as any).shortcut
+      void rpc.shortcut
         .dispatch(binding.id, binding.scope, windowId, paneId)
         .catch((err: unknown) => {
           console.error(`[shortcut-forwarder] dispatch failed:`, err);

@@ -27,8 +27,9 @@ export class NewAgentService extends Service {
     windowId: string
     sentinelTabId: string
     cwd?: string
+    workspaceId?: string
   }): Promise<{ agentId: string; sessionId: string }> {
-    const { windowId, sentinelTabId, cwd } = args
+    const { windowId, sentinelTabId, cwd, workspaceId } = args
     const client = this.ctx.db.client
     const kernel = client.readRoot().plugin.kernel as any
 
@@ -52,6 +53,7 @@ export class NewAgentService extends Service {
         startCommand: selectedConfig.startCommand,
         configId: selectedConfig.id,
         metadata: cwd ? { cwd } : {},
+        workspaceId,
         eventLog: makeCollection({
           collectionId: nanoid(),
           debugName: "eventLog",

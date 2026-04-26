@@ -146,7 +146,7 @@ export function KeybindingsSection() {
                   {isOverridden && (
                     <button
                       onClick={() =>
-                        (rpc as any).shortcut.setBinding(r.id, null)
+                        rpc.shortcut.setBinding(r.id, null)
                       }
                       className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded hover:bg-muted"
                       title="Reset to default"
@@ -157,14 +157,14 @@ export function KeybindingsSection() {
                   )}
                   {isDisabled ? (
                     <button
-                      onClick={() => (rpc as any).shortcut.enable(r.id)}
+                      onClick={() => rpc.shortcut.enable(r.id)}
                       className="text-[11px] px-1.5 py-0.5 rounded hover:bg-muted"
                     >
                       Enable
                     </button>
                   ) : (
                     <button
-                      onClick={() => (rpc as any).shortcut.disable(r.id)}
+                      onClick={() => rpc.shortcut.disable(r.id)}
                       className="text-[11px] px-1.5 py-0.5 rounded hover:bg-muted text-muted-foreground"
                     >
                       Disable
@@ -199,7 +199,7 @@ export function KeybindingsSection() {
                     </span>
                     <button
                       onClick={() =>
-                        (rpc as any).shortcut.setBinding(id, null)
+                        rpc.shortcut.setBinding(id, null)
                       }
                       className="text-muted-foreground hover:text-foreground"
                       title="Remove override"
@@ -226,7 +226,7 @@ export function KeybindingsSection() {
               currentBinding={current}
               onCommit={async (binding) => {
                 setEditing(null);
-                await (rpc as any).shortcut.setBinding(row.id, binding);
+                await rpc.shortcut.setBinding(row.id, binding);
               }}
               onClose={() => setEditing(null)}
             />
