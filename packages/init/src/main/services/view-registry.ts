@@ -11,7 +11,8 @@ interface ViewEntry {
   url: string;
   port: number;
   ownsServer: boolean;
-  meta?: { kind?: string };
+  workspaceId?: string;
+  meta?: { kind?: string; sidebar?: boolean };
 }
 
 export class ViewRegistryService extends Service {
@@ -26,11 +27,12 @@ export class ViewRegistryService extends Service {
     scope: string,
     root: string,
     configFile?: string | false,
-    meta?: { kind?: string },
+    meta?: { kind?: string; sidebar?: boolean },
   ): Promise<ViewEntry> {
     const existing = this.views.get(scope);
     if (existing) return existing;
 
+    const ws = runtime.getActiveScope() ?? undefined;
     const reloaderEntry = await this.ctx.reloader.create(
       scope,
       root,
@@ -41,11 +43,12 @@ export class ViewRegistryService extends Service {
       url: reloaderEntry.url,
       port: reloaderEntry.port,
       ownsServer: true,
+      workspaceId: ws,
       meta,
     };
     this.views.set(scope, entry);
     await this.syncToDb();
-    console.log(`[view-registry] registered "${scope}" at ${entry.url}`);
+    console.log(`[view-registry] registered "${scope}" at ${entry.url} wsId=${ws ?? "global"} sidebar=${meta?.sidebar ?? false}`);
     return entry;
   }
 
@@ -53,7 +56,7 @@ export class ViewRegistryService extends Service {
     scope: string,
     reloaderId: string,
     pathPrefix: string,
-    meta?: { kind?: string },
+    meta?: { kind?: string; sidebar?: boolean },
   ): ViewEntry {
     const existing = this.views.get(scope);
     if (existing) return existing;
@@ -64,17 +67,19 @@ export class ViewRegistryService extends Service {
         `Reloader "${reloaderId}" not found for alias "${scope}"`,
       );
 
+    const ws = runtime.getActiveScope() ?? undefined;
     const entry: ViewEntry = {
       scope,
       url: `${reloaderEntry.url}${pathPrefix}`,
       port: reloaderEntry.port,
       ownsServer: false,
+      workspaceId: ws,
       meta,
     };
     this.views.set(scope, entry);
     void this.syncToDb();
     console.log(
-      `[view-registry] aliased "${scope}" -> ${reloaderId}${pathPrefix}`,
+      `[view-registry] aliased "${scope}" -> ${reloaderId}${pathPrefix} wsId=${ws ?? "global"} sidebar=${meta?.sidebar ?? false}`,
     );
     return entry;
   }
@@ -137,8 +142,12 @@ export class ViewRegistryService extends Service {
       url: e.url,
       port: e.port,
       icon: this.manifestIcons.get(e.scope),
+      workspaceId: e.workspaceId,
       meta: e.meta,
     }));
+    console.log(
+      `[view-registry] syncToDb entries=[${snapshot.map(s => `${s.scope}(ws=${s.workspaceId ?? "global"},sidebar=${s.meta?.sidebar ?? false})`).join(", ")}]`,
+    );
     await Effect.runPromise(
       client.update((root) => {
         root.plugin.kernel.viewRegistry = snapshot;

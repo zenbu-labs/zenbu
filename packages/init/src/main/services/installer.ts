@@ -272,6 +272,25 @@ export class InstallerService extends Service {
     fs.writeFileSync(configPath, lines.join("\n"))
   }
 
+  /**
+   * Remove a plugin's line from the config entirely (as opposed to
+   * `togglePlugin(..., false)` which only comments it out). Used by
+   * uninstall flows that also delete the plugin's files, so we don't
+   * leave the config pointing at a missing manifest.
+   */
+  removePluginFromConfig(manifestPath: string): void {
+    const configPath = resolveConfigPath()
+    if (!fs.existsSync(configPath)) return
+    const raw = fs.readFileSync(configPath, "utf8")
+    const lines = raw.split("\n")
+    const escaped = manifestPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    const re = new RegExp(`^\\s*(//\\s*)?"${escaped}"`)
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (re.test(lines[i]!)) lines.splice(i, 1)
+    }
+    fs.writeFileSync(configPath, lines.join("\n"))
+  }
+
   togglePlugin(manifestPath: string, enabled: boolean): void {
     const configPath = resolveConfigPath()
     if (!fs.existsSync(configPath)) return

@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { useDb, useCollection } from "../../../lib/kyju-react";
+import { useKyjuClient } from "../../../lib/providers";
 import { useRpc } from "../../../lib/providers";
 import { useShortcut } from "../../../lib/shortcut-handler";
 import {
@@ -44,15 +45,21 @@ export function ChangeCwdItem({
   currentCwd: string;
 }) {
   const rpc = useRpc();
+  const client = useKyjuClient();
   const onClick = useCallback(async () => {
     const dir = await rpc.window.pickDirectory();
     if (!dir) return;
     try {
-      await rpc.agent.changeCwd(agentId, dir);
+      const current = client.plugin.kernel.composerPending.read() ?? {};
+      const next = {
+        ...current,
+        [agentId]: { ...(current[agentId] ?? {}), cwd: dir },
+      };
+      await client.plugin.kernel.composerPending.set(next);
     } catch (err) {
-      console.error("[cwd-selector] changeCwd failed", err);
+      console.error("[cwd-selector] write pending cwd failed", err);
     }
-  }, [rpc, agentId]);
+  }, [rpc, agentId, client]);
   return (
     <DropdownMenuItem className="text-xs" onClick={onClick}>
       <FolderSyncIcon className="size-3" />
@@ -109,7 +116,7 @@ function ModeCombobox({
           role="combobox"
           aria-expanded={open}
           size="sm"
-          className="h-6 shrink-0 justify-between gap-1 px-2 font-normal text-xs text-neutral-400 hover:text-neutral-600 shadow-none"
+          className="h-6 shrink-0 justify-between gap-1 px-2 font-normal text-xs text-(--zenbu-composer-placeholder) hover:text-(--zenbu-composer-foreground) hover:bg-(--zenbu-control-hover) shadow-none"
         >
           <span className="truncate">{selected?.name ?? currentValue}</span>
           <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
@@ -135,14 +142,14 @@ function ModeCombobox({
                     className={cn(
                       "group flex flex-col items-start gap-0.5 px-2 py-2",
                       isActive &&
-                        "bg-neutral-100 data-[selected=true]:bg-neutral-100",
+                        "bg-accent data-[selected=true]:bg-accent",
                     )}
                   >
                     <span className="flex w-full items-center gap-2">
                       <span
                         className={cn(
                           "flex-1 truncate text-sm",
-                          isActive && "font-medium text-neutral-900",
+                          isActive && "font-medium text-foreground",
                         )}
                       >
                         {opt.name}
@@ -164,7 +171,7 @@ function ModeCombobox({
                               "flex size-5 shrink-0 items-center justify-center rounded transition-opacity",
                               isDefault
                                 ? "opacity-100 cursor-default"
-                                : "opacity-0 group-hover:opacity-60 hover:!opacity-100",
+                                : "opacity-0 group-hover:opacity-60 hover:opacity-100!",
                             )}
                           >
                             <StarIcon
@@ -222,7 +229,7 @@ function ContextIndicator({ used, size }: { used: number; size: number }) {
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-neutral-100 cursor-pointer"
+          className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-(--zenbu-control-hover) cursor-pointer"
           title={`${pct}% context used`}
         >
           <svg
@@ -236,7 +243,7 @@ function ContextIndicator({ used, size }: { used: number; size: number }) {
               cy="12"
               r={radius}
               fill="none"
-              stroke="#c4c4c4"
+              stroke="var(--zenbu-context-track)"
               strokeWidth={stroke}
             />
             <circle
@@ -249,7 +256,7 @@ function ContextIndicator({ used, size }: { used: number; size: number }) {
                   ? "#ef4444"
                   : fraction > 0.7
                   ? "#f59e0b"
-                  : "#737373"
+                  : "var(--zenbu-context-fill)"
               }
               strokeWidth={stroke}
               strokeDasharray={`${filled} ${gap}`}
@@ -263,13 +270,13 @@ function ContextIndicator({ used, size }: { used: number; size: number }) {
         align="center"
         className="w-auto px-3 py-2 text-xs"
       >
-        <div className="flex items-center gap-1 text-neutral-600">
-          <span className="font-medium text-neutral-900">
+        <div className="flex items-center gap-1 text-(--zenbu-composer-placeholder)">
+          <span className="font-medium text-(--zenbu-composer-foreground)">
             {formatTokens(used)}
           </span>
           <span>/</span>
           <span>{formatTokens(size)} tokens</span>
-          <span className="text-neutral-400">({pct}%)</span>
+          <span className="text-(--zenbu-composer-placeholder)">({pct}%)</span>
         </div>
       </PopoverContent>
     </Popover>
@@ -303,7 +310,12 @@ export function ComposerToolbar({ agentId }: { agentId: string }) {
     return null;
   }, [events]);
 
-  const agentCwd = agent?.metadata?.cwd as string | undefined;
+  const pendingCwd = useDb(
+    (root) => root.plugin.kernel.composerPending?.[agentId]?.cwd,
+  );
+  const agentCwd = (pendingCwd ?? (agent?.metadata?.cwd as string | undefined)) as
+    | string
+    | undefined;
 
   const template = useMemo(
     () => agentConfigs?.find((c) => c.id === agent?.configId),
@@ -338,13 +350,13 @@ export function ComposerToolbar({ agentId }: { agentId: string }) {
   const cwdDisplayName = agentCwd ? agentCwd.split("/").pop() || agentCwd : "";
 
   return (
-    <div className="mx-auto w-full max-w-[919px] px-[1.625rem] pb-2 flex items-center">
+    <div className="mx-auto w-full max-w-[919px] px-6.5 pb-2 flex items-center">
       {showCwd ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors truncate max-w-[200px]"
+              className="text-xs text-(--zenbu-composer-placeholder) hover:text-(--zenbu-composer-foreground) transition-colors truncate max-w-[200px]"
               title={agentCwd!}
             >
               {cwdDisplayName}

@@ -23,7 +23,9 @@ export async function connectCli(): Promise<CliConnection | null> {
   const config = readRuntimeConfig()
   if (!config) return null
 
-  const ws = new WebSocket(`ws://127.0.0.1:${config.wsPort}`)
+  const ws = new WebSocket(
+    `ws://127.0.0.1:${config.wsPort}?token=${encodeURIComponent(config.wsToken)}`,
+  )
 
   try {
     await new Promise<void>((resolve, reject) => {

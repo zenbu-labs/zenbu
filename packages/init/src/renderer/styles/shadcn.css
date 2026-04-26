@@ -33,6 +33,27 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.87 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  --zenbu-panel: #F4F4F4;
+  --zenbu-panel-foreground: #111;
+  --zenbu-chrome: #E0E0E0;
+  --zenbu-chrome-foreground: #171717;
+  --zenbu-panel-border: rgba(0, 0, 0, 0.08);
+  --zenbu-tab-border: #BDBDBD;
+  --zenbu-agent-sidebar: #EBEBEB;
+  --zenbu-agent-sidebar-foreground: #525252;
+  --zenbu-agent-sidebar-muted: #A3A3A3;
+  --zenbu-agent-sidebar-hover: rgba(0, 0, 0, 0.06);
+  --zenbu-agent-sidebar-active: #E0E0E0;
+  --zenbu-composer: rgba(255, 255, 255, 0.8);
+  --zenbu-composer-foreground: #111;
+  --zenbu-composer-placeholder: #737373;
+  --zenbu-composer-border: #D4D4D4;
+  --zenbu-control-hover: rgba(0, 0, 0, 0.06);
+  --zenbu-user-message: var(--card);
+  --zenbu-user-message-foreground: var(--card-foreground);
+  --zenbu-user-message-border: var(--border);
+  --zenbu-context-track: var(--border);
+  --zenbu-context-fill: var(--muted-foreground);
 }
 
 .dark {
@@ -63,6 +84,27 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.269 0 0);
   --sidebar-ring: oklch(0.439 0 0);
+  --zenbu-panel: var(--background);
+  --zenbu-panel-foreground: var(--foreground);
+  --zenbu-chrome: var(--muted);
+  --zenbu-chrome-foreground: var(--foreground);
+  --zenbu-panel-border: color-mix(in oklch, var(--border) 80%, transparent);
+  --zenbu-tab-border: var(--border);
+  --zenbu-agent-sidebar: var(--card);
+  --zenbu-agent-sidebar-foreground: var(--foreground);
+  --zenbu-agent-sidebar-muted: var(--muted-foreground);
+  --zenbu-agent-sidebar-hover: color-mix(in oklch, var(--accent) 70%, transparent);
+  --zenbu-agent-sidebar-active: var(--accent);
+  --zenbu-composer: var(--card);
+  --zenbu-composer-foreground: var(--foreground);
+  --zenbu-composer-placeholder: var(--muted-foreground);
+  --zenbu-composer-border: var(--border);
+  --zenbu-control-hover: color-mix(in oklch, var(--accent) 70%, transparent);
+  --zenbu-user-message: var(--card);
+  --zenbu-user-message-foreground: var(--card-foreground);
+  --zenbu-user-message-border: var(--border);
+  --zenbu-context-track: var(--border);
+  --zenbu-context-fill: var(--muted-foreground);
 }
 
 @theme inline {

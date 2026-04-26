@@ -1,6 +1,6 @@
-import { useEffect } from "react"
-import { useEvents } from "../../../lib/providers"
-import { dispatchTokenInsert } from "../lib/token-bus"
+import { useEffect } from "react";
+import { useEvents } from "../../../lib/providers";
+import { dispatchTokenInsert } from "../lib/token-bus";
 
 /**
  * Renderer bridge between the backend `insert.requested` zenrpc event and
@@ -17,25 +17,21 @@ import { dispatchTokenInsert } from "../lib/token-bus"
  * to.
  */
 export function InsertBridgePlugin({ agentId }: { agentId: string }) {
-  const events = useEvents()
+  const events = useEvents();
   useEffect(() => {
-    const unsub = (events as any).insert.requested.subscribe(
-      (data: {
-        sessionId: string
-        agentId: string
-        payload: any
-      }) => {
-        if (data.agentId !== agentId) return
-        if (typeof document !== "undefined" && !document.hasFocus()) return
+    const unsub = events.insert.requested.subscribe(
+      (data: { sessionId: string; agentId: string; payload: any }) => {
+        if (data.agentId !== agentId) return;
+        if (typeof document !== "undefined" && !document.hasFocus()) return;
         dispatchTokenInsert({
           sessionId: data.sessionId,
           agentId: data.agentId,
           payload: data.payload,
           source: "rpc",
-        })
+        });
       },
-    )
-    return () => unsub()
-  }, [events, agentId])
-  return null
+    );
+    return () => unsub();
+  }, [events, agentId]);
+  return null;
 }

@@ -1,0 +1,7 @@
+@import "../../styles/app.css";
+
+html,
+body,
+#root {
+  background: var(--zenbu-panel);
+}

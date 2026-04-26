@@ -70,7 +70,7 @@ export function ReviewMode({
       const pairs = await Promise.all(
         entries.map(async (e) => {
           try {
-            const result: FileDiffResult = await (rpc as any).gitUpdates.getFileDiff({
+            const result: FileDiffResult = await (rpc  ).gitUpdates.getFileDiff({
               path: e.path,
               oldPath: e.oldPath,
             });
@@ -93,7 +93,7 @@ export function ReviewMode({
     let cancelled = false;
     (async () => {
       try {
-        const result: Record<string, DiffStats> = await (rpc as any).gitUpdates.getDiffSummary({
+        const result: Record<string, DiffStats> = await (rpc  ).gitUpdates.getDiffSummary({
           paths: entries.map((e) => e.path),
         });
         if (cancelled) return;

@@ -18,14 +18,9 @@ type ShortcutEntry = {
 export function KeybindingsSection() {
   const rpc = useRpc();
 
-  const registry = (useDb((root: any) => root.plugin.kernel.shortcutRegistry) ??
-    []) as ShortcutEntry[];
-  const overrides = (useDb(
-    (root: any) => root.plugin.kernel.shortcutOverrides,
-  ) ?? {}) as Record<string, string>;
-  const disabled = (useDb(
-    (root: any) => root.plugin.kernel.shortcutDisabled,
-  ) ?? []) as string[];
+  const registry = useDb((root) => root.plugin.kernel.shortcutRegistry) ?? [];
+  const overrides = useDb((root) => root.plugin.kernel.shortcutOverrides) ?? {};
+  const disabled = useDb((root) => root.plugin.kernel.shortcutDisabled) ?? [];
   const disabledSet = useMemo(() => new Set(disabled), [disabled]);
 
   const [query, setQuery] = useState("");

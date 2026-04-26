@@ -1,8 +1,4 @@
-@import "tailwindcss";
-@import "../../styles/shadcn.css";
-@import "../../styles/chat.css";
-@source "../../../../node_modules/streamdown/dist";
-@source "../../../../node_modules/@streamdown/code/dist";
+@import "../../styles/app.css";
 
 @keyframes tab-sweep {
   0% {
@@ -34,11 +30,7 @@
 html,
 body,
 #root {
-  margin: 0;
-  padding: 0;
-  height: 100%;
-  overflow: hidden;
-  background: #F4F4F4;
+  background: var(--zenbu-panel);
 }
 
 body.tab-dragging iframe {

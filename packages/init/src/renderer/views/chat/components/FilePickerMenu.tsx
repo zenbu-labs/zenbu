@@ -21,7 +21,7 @@ export function FilePickerMenu({
   return createPortal(
     <div
       style={{ position: "absolute", bottom: "calc(100% + 20px)", left: 16 }}
-      className="z-50 min-w-[200px] max-w-[320px] overflow-hidden rounded-sm border border-neutral-300 bg-white shadow-xl"
+      className="z-50 min-w-[200px] max-w-[320px] overflow-hidden rounded-sm border border-border bg-popover text-popover-foreground shadow-xl"
     >
       <div className="max-h-[240px] overflow-y-auto p-0.5">
         {options.map((option, i) => (
@@ -33,8 +33,8 @@ export function FilePickerMenu({
             aria-selected={selectedIndex === i}
             className={`flex w-full items-center px-2 py-1 text-left text-xs rounded-[2px] ${
               selectedIndex === i
-                ? "bg-neutral-100 text-neutral-800"
-                : "text-neutral-500 hover:bg-neutral-100"
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             }`}
             onMouseEnter={() => setHighlightedIndex(i)}
             onClick={() => selectOptionAndCleanUp(option)}

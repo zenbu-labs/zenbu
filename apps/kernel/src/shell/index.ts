@@ -714,6 +714,12 @@ app.whenReady().then(async () => {
     });
 
     await traceSpan("advice-register", async () => {
+      // Anchor the advice transform to the kernel's project root. Without
+      // this, node-loader falls back to process.cwd(), which may be an
+      // ancestor of third-party plugins when launched via `zen --blocking`
+      // from a high-up dir — pulling their .ts files into the transform
+      // and injecting `@zenbu/advice/runtime` imports they can't resolve.
+      process.env.ZENBU_ADVICE_ROOT = projectRoot;
       await import("@zenbu/advice/node");
     });
 

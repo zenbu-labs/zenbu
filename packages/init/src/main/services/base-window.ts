@@ -47,7 +47,11 @@ export class BaseWindowService extends Service {
         // 
       show: opts?.show ?? true,
       titleBarStyle: "hidden",
-      trafficLightPosition: { x: 12, y: 10 },
+      // Traffic lights sit on top of our 36px orchestrator title bar.
+      // macOS draws each light at 12×12 px, so centering vertically:
+      //   y = (36 - 12) / 2 = 12
+      // x mirrors macOS Finder/Safari (~20 px inset from window edge).
+      trafficLightPosition: { x: 14, y: 10 },
       backgroundColor: "#F4F4F4",
       // 
     })

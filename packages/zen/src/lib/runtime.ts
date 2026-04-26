@@ -16,6 +16,7 @@ const RUNTIME_JSON = join(homedir(), ".zenbu", ".internal", "runtime.json")
  */
 export type RuntimeConfig = {
   wsPort: number
+  wsToken: string
   dbPath: string
   pid: number
 }
@@ -24,7 +25,11 @@ export function readRuntimeConfig(): RuntimeConfig | null {
   if (!existsSync(RUNTIME_JSON)) return null
   try {
     const data = JSON.parse(readFileSync(RUNTIME_JSON, "utf-8"))
-    if (typeof data.wsPort !== "number" || typeof data.pid !== "number") {
+    if (
+      typeof data.wsPort !== "number" ||
+      typeof data.wsToken !== "string" ||
+      typeof data.pid !== "number"
+    ) {
       return null
     }
     try {
@@ -32,7 +37,12 @@ export function readRuntimeConfig(): RuntimeConfig | null {
     } catch {
       return null
     }
-    return { wsPort: data.wsPort, dbPath: data.dbPath, pid: data.pid }
+    return {
+      wsPort: data.wsPort,
+      wsToken: data.wsToken,
+      dbPath: data.dbPath,
+      pid: data.pid,
+    }
   } catch {
     return null
   }

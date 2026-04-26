@@ -1,4 +1,11 @@
-import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from "react";
 import { nanoid } from "nanoid";
 import {
   ArrowLeftIcon,
@@ -81,10 +88,14 @@ export function SettingsDialog({
   initialSection?: Section;
   onRequestReview?: (entries: ReviewFileEntry[]) => void;
 }) {
-  const [section, setSection] = useState<Section>(initialSection ?? "registry");
+  const visibleInitialSection =
+    initialSection === "registry" ? "general" : (initialSection ?? "general");
+  const [section, setSection] = useState<Section>(visibleInitialSection);
 
   useEffect(() => {
-    if (open && initialSection) setSection(initialSection);
+    if (open && initialSection) {
+      setSection(initialSection === "registry" ? "general" : initialSection);
+    }
   }, [open, initialSection]);
 
   return (
@@ -93,11 +104,13 @@ export function SettingsDialog({
         <DialogTitle className="sr-only">Settings</DialogTitle>
         <div className="flex flex-1 min-h-0">
           <nav className="w-[140px] shrink-0 border-r border-border bg-muted/30 p-2 space-y-0.5">
+            {/*
             <SidebarItem
               label="Plugins"
               active={section === "registry"}
               onClick={() => setSection("registry")}
             />
+            */}
             <SidebarItem
               label="Agents"
               active={section === "general"}
@@ -130,7 +143,9 @@ export function SettingsDialog({
               {section === "updates" && (
                 <UpdatesSection onRequestReview={onRequestReview} />
               )}
+              {/*
               {section === "registry" && <RegistrySection />}
+              */}
               {section === "keybindings" && <KeybindingsSection />}
             </div>
           </div>
@@ -198,7 +213,7 @@ function GeneralSection() {
         availableModels: [],
         availableThinkingLevels: [],
         availableModes: [],
-        defaultConfiguration: {}
+        defaultConfiguration: {},
       },
     ]);
     if (!selectedConfigId) {
@@ -368,7 +383,11 @@ function AgentRow({
     async (file: File) => {
       const buffer = await file.arrayBuffer();
       const data = new Uint8Array(buffer);
-      const blobId = await (client as any).createBlob(data, true);
+      /**
+       * why is this not in the type sig??
+       */
+      // @ts-expect-error
+      const blobId = await client.createBlob(data, true);
       await onPatch({ iconBlobId: blobId });
     },
     [client, onPatch],
@@ -576,7 +595,14 @@ type Commit = {
 type FileChange = {
   path: string;
   oldPath: string | null;
-  status: "added" | "modified" | "deleted" | "renamed" | "copied" | "typechange" | "unknown";
+  status:
+    | "added"
+    | "modified"
+    | "deleted"
+    | "renamed"
+    | "copied"
+    | "typechange"
+    | "unknown";
 };
 
 type WorkingTreeStatus = {
@@ -686,7 +712,7 @@ function UpdatesSection({
       setLoadingUpstream(true);
       setUpstreamError(null);
       try {
-        const next: UpdateStatus = await (rpc).gitUpdates.checkUpdates(force);
+        const next: UpdateStatus = await rpc.gitUpdates.checkUpdates(force);
         setStatus(next);
       } catch (err) {
         setUpstreamError(err instanceof Error ? err.message : String(err));
@@ -701,7 +727,7 @@ function UpdatesSection({
     setLoadingOverview(true);
     setOverviewError(null);
     try {
-      const next: GitOverview = await (rpc).gitUpdates.getOverview();
+      const next: GitOverview = await rpc.gitUpdates.getOverview();
       setOverview(next);
     } catch (err) {
       setOverviewError(err instanceof Error ? err.message : String(err));
@@ -718,7 +744,8 @@ function UpdatesSection({
   useEffect(() => {
     (async () => {
       try {
-        const cached: UpdateStatus | null = await (rpc).gitUpdates.getCachedStatus();
+        const cached: UpdateStatus | null =
+          await rpc.gitUpdates.getCachedStatus();
         if (cached) setStatus(cached);
         else checkUpstream(false);
       } catch (err) {
@@ -732,9 +759,10 @@ function UpdatesSection({
 
   const ctx: DataCtx = { overview, status, refreshAll, rpc };
 
-  const changeCount = overview && overview.kind === "ok"
-    ? coalesceChanges(overview.status).length
-    : 0;
+  const changeCount =
+    overview && overview.kind === "ok"
+      ? coalesceChanges(overview.status).length
+      : 0;
 
   return (
     <div className="p-5 space-y-5">
@@ -754,19 +782,32 @@ function UpdatesSection({
       <KernelAppVersionCard />
 
       <div className="flex items-center gap-0.5 border-b border-border -mx-5 px-5">
-        <TabButton active={tab === "overview"} onClick={() => setTab("overview")}>
+        <TabButton
+          active={tab === "overview"}
+          onClick={() => setTab("overview")}
+        >
           Overview
         </TabButton>
-        <TabButton active={tab === "changes"} onClick={() => setTab("changes")} badge={changeCount}>
+        <TabButton
+          active={tab === "changes"}
+          onClick={() => setTab("changes")}
+          badge={changeCount}
+        >
           Changes
         </TabButton>
         <TabButton active={tab === "history"} onClick={() => setTab("history")}>
           History
         </TabButton>
-        <TabButton active={tab === "branches"} onClick={() => setTab("branches")}>
+        <TabButton
+          active={tab === "branches"}
+          onClick={() => setTab("branches")}
+        >
           Branches
         </TabButton>
-        <TabButton active={tab === "advanced"} onClick={() => setTab("advanced")}>
+        <TabButton
+          active={tab === "advanced"}
+          onClick={() => setTab("advanced")}
+        >
           Advanced
         </TabButton>
       </div>
@@ -863,7 +904,7 @@ function KernelAppVersionCard() {
   const availableVersion = state?.availableVersion ?? null;
   const lastCheckedAt = state?.lastCheckedAt ?? null;
   const error = state?.error ?? null;
-  const downloadPercent = state?.downloadPercent ?? null;
+  const downloadPercent = (state?.downloadPercent as number) ?? null;
 
   const statusLabel = (() => {
     switch (status) {
@@ -896,7 +937,7 @@ function KernelAppVersionCard() {
             {lastCheckedAt && (
               <>
                 {" · checked "}
-                <RelativeTime ts={lastCheckedAt} />
+                <RelativeTime ts={lastCheckedAt as number} />
               </>
             )}
           </div>
@@ -910,13 +951,16 @@ function KernelAppVersionCard() {
         <div className="relative h-1.5 rounded-full bg-blue-100 overflow-hidden">
           <div
             className="absolute inset-y-0 left-0 bg-blue-500 transition-[width] duration-200"
-            style={{ width: `${Math.max(0, Math.min(100, downloadPercent ?? 0))}%` }}
+            style={{
+              width: `${Math.max(0, Math.min(100, downloadPercent ?? 0))}%`,
+            }}
           />
         </div>
       )}
 
       {status === "error" && error && (
         <pre className="whitespace-pre-wrap break-words rounded bg-background p-2 text-[11px] text-destructive">
+          {/* @ts-expect-error */}
           {error}
         </pre>
       )}
@@ -926,7 +970,9 @@ function KernelAppVersionCard() {
           variant="outline"
           size="sm"
           onClick={check}
-          disabled={busy !== null || status === "checking" || status === "downloading"}
+          disabled={
+            busy !== null || status === "checking" || status === "downloading"
+          }
           className="text-xs"
         >
           {busy === "check" || status === "checking"
@@ -1039,9 +1085,11 @@ function useMutation<Args extends any[]>(
   clear: () => void;
 } {
   const [pending, setPending] = useState(false);
-  const [feedback, setFeedback] = useState<
-    { tone: "ok" | "error"; text: string; url?: string } | null
-  >(null);
+  const [feedback, setFeedback] = useState<{
+    tone: "ok" | "error";
+    text: string;
+    url?: string;
+  } | null>(null);
 
   const run = useCallback(
     async (...args: Args) => {
@@ -1149,13 +1197,17 @@ function PullAndInstallButton({
   const rpc = useRpc();
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<PullAndInstallResult | null>(null);
-  const [pendingUpdate, setPendingUpdate] = useState<PendingUpdate | null>(null);
+  const [pendingUpdate, setPendingUpdate] = useState<PendingUpdate | null>(
+    null,
+  );
 
   const run = useCallback(async () => {
     setPending(true);
     setResult(null);
     try {
-      const r: PullAndInstallResult = await (rpc as any).gitUpdates.pullAndInstall({
+      const r: PullAndInstallResult = await (
+        rpc as any
+      ).gitUpdates.pullAndInstall({
         plugin: pluginName,
       });
       setResult(r);
@@ -1176,7 +1228,9 @@ function PullAndInstallButton({
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         {disabledReason && disabled && (
-          <span className="text-xs text-muted-foreground">{disabledReason}</span>
+          <span className="text-xs text-muted-foreground">
+            {disabledReason}
+          </span>
         )}
         <Button size="sm" onClick={run} disabled={buttonDisabled}>
           {pending ? "Checking…" : label}
@@ -1228,10 +1282,13 @@ function OverviewTab({
   if (!status) return null;
 
   if (status.kind !== "ok") {
-    return <p className="text-sm text-muted-foreground">{nonOkMessage(status)}</p>;
+    return (
+      <p className="text-sm text-muted-foreground">{nonOkMessage(status)}</p>
+    );
   }
 
-  const { ahead, behind, dirty, mergeable, conflictingFiles, head, commits } = status;
+  const { ahead, behind, dirty, mergeable, conflictingFiles, head, commits } =
+    status;
 
   let canPull = false;
   let pullReason = "";
@@ -1291,7 +1348,12 @@ function OverviewTab({
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-2">
-                  <p className={cn("text-sm truncate", isCurrent && "font-medium")}>
+                  <p
+                    className={cn(
+                      "text-sm truncate",
+                      isCurrent && "font-medium",
+                    )}
+                  >
                     {c.subject || "(no message)"}
                   </p>
                   <span className="font-mono text-[10px] text-muted-foreground shrink-0">
@@ -1402,7 +1464,10 @@ function ChangeRow({ change, rpc }: { change: UserChange; rpc: any }) {
         setDiff(result);
       } catch (err) {
         if (cancelled) return;
-        setDiff({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+        setDiff({
+          kind: "error",
+          message: err instanceof Error ? err.message : String(err),
+        });
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -1435,24 +1500,34 @@ function ChangeRow({ change, rpc }: { change: UserChange; rpc: any }) {
       {expanded && (
         <div className="border-t border-border bg-background">
           {loading && !diff && (
-            <p className="px-3 py-2 text-[11px] text-muted-foreground">Loading diff…</p>
+            <p className="px-3 py-2 text-[11px] text-muted-foreground">
+              Loading diff…
+            </p>
           )}
           {diff?.kind === "error" && (
             <p className="px-3 py-2 text-[11px] text-red-500">{diff.message}</p>
           )}
           {diff?.kind === "ok" && diff.binary && (
-            <p className="px-3 py-2 text-[11px] text-muted-foreground">Binary file — no preview.</p>
+            <p className="px-3 py-2 text-[11px] text-muted-foreground">
+              Binary file — no preview.
+            </p>
           )}
-          {diff?.kind === "ok" && !diff.binary && diff.oldText === diff.newText && (
-            <p className="px-3 py-2 text-[11px] text-muted-foreground">No textual changes.</p>
-          )}
-          {diff?.kind === "ok" && !diff.binary && diff.oldText !== diff.newText && (
-            <DiffViewer
-              oldText={diff.oldText}
-              newText={diff.newText}
-              language={change.path}
-            />
-          )}
+          {diff?.kind === "ok" &&
+            !diff.binary &&
+            diff.oldText === diff.newText && (
+              <p className="px-3 py-2 text-[11px] text-muted-foreground">
+                No textual changes.
+              </p>
+            )}
+          {diff?.kind === "ok" &&
+            !diff.binary &&
+            diff.oldText !== diff.newText && (
+              <DiffViewer
+                oldText={diff.oldText}
+                newText={diff.newText}
+                language={change.path}
+              />
+            )}
         </div>
       )}
     </div>
@@ -1476,7 +1551,9 @@ function ChangesTab({
   const [prBranch, setPrBranch] = useState("");
 
   const commit = useMutation(async (msg: string) => {
-    const result: MutationResult = await rpc.gitUpdates.commitChanges({ message: msg });
+    const result: MutationResult = await rpc.gitUpdates.commitChanges({
+      message: msg,
+    });
     if (result.ok) {
       setMessage("");
       refreshAll();
@@ -1485,21 +1562,26 @@ function ChangesTab({
   });
 
   const push = useMutation(async () => {
-    const result: MutationResult = await rpc.gitUpdates.pushCurrent({ setUpstream: true });
+    const result: MutationResult = await rpc.gitUpdates.pushCurrent({
+      setUpstream: true,
+    });
     if (result.ok) refreshAll();
     return result;
   });
 
-  const createPr = useMutation(async (args: { branchName: string; commitMessage?: string }) => {
-    const result: MutationResult = await rpc.gitUpdates.createPullRequest(args);
-    if (result.ok) {
-      setPrMode(false);
-      setPrBranch("");
-      setMessage("");
-      refreshAll();
-    }
-    return result;
-  });
+  const createPr = useMutation(
+    async (args: { branchName: string; commitMessage?: string }) => {
+      const result: MutationResult =
+        await rpc.gitUpdates.createPullRequest(args);
+      if (result.ok) {
+        setPrMode(false);
+        setPrBranch("");
+        setMessage("");
+        refreshAll();
+      }
+      return result;
+    },
+  );
 
   if (overviewError) return <ErrorBox message={overviewError} />;
   if (!overview && loadingOverview) {
@@ -1572,7 +1654,9 @@ function ChangesTab({
               onClick={() => commit.run(message)}
               disabled={!message.trim() || commit.pending}
             >
-              {commit.pending ? "Committing…" : `Commit ${changes.length} file${changes.length === 1 ? "" : "s"}`}
+              {commit.pending
+                ? "Committing…"
+                : `Commit ${changes.length} file${changes.length === 1 ? "" : "s"}`}
             </Button>
             <Button
               variant="outline"
@@ -1729,9 +1813,11 @@ function BranchesTab({ ctx }: { ctx: DataCtx }) {
   const [newBranch, setNewBranch] = useState("");
 
   const create = useMutation(async (name: string) => {
-    const result: MutationResult = await rpc.gitUpdates.createBranchAndCheckout({
-      name,
-    });
+    const result: MutationResult = await rpc.gitUpdates.createBranchAndCheckout(
+      {
+        name,
+      },
+    );
     if (result.ok) {
       setNewBranch("");
       refreshAll();
@@ -1799,7 +1885,12 @@ function BranchesTab({ ctx }: { ctx: DataCtx }) {
             <div key={b.name} className="flex items-center gap-3 px-3 py-2">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className={cn("font-mono text-xs", b.isCurrent ? "" : "text-muted-foreground")}>
+                  <span
+                    className={cn(
+                      "font-mono text-xs",
+                      b.isCurrent ? "" : "text-muted-foreground",
+                    )}
+                  >
                     {b.isCurrent ? "●" : "○"}
                   </span>
                   <span className="font-mono text-sm truncate">{b.name}</span>
@@ -1848,7 +1939,9 @@ function BranchesTab({ ctx }: { ctx: DataCtx }) {
         <div className="rounded-md border border-border bg-muted/30 divide-y divide-border max-h-56 overflow-y-auto">
           {remote.map((b) => (
             <div key={b.name} className="flex items-center gap-3 px-3 py-2">
-              <span className="font-mono text-xs truncate flex-1">{b.name}</span>
+              <span className="font-mono text-xs truncate flex-1">
+                {b.name}
+              </span>
               <Button
                 variant="outline"
                 size="sm"
@@ -2032,8 +2125,12 @@ function RegistrySection() {
   const [search, setSearch] = useState("");
   const [showInstalledOnly, setShowInstalledOnly] = useState(false);
   const [selectedName, setSelectedName] = useState<string | null>(null);
-  const [metadataByName, setMetadataByName] = useState<Record<string, RepoInfo>>({});
-  const [readmeByName, setReadmeByName] = useState<Record<string, ReadmeState>>({});
+  const [metadataByName, setMetadataByName] = useState<
+    Record<string, RepoInfo>
+  >({});
+  const [readmeByName, setReadmeByName] = useState<Record<string, ReadmeState>>(
+    {},
+  );
   const [sortOrder, setSortOrder] = useState<SortOrder>("stars");
   const readmeRequestedRef = useRef<Set<string>>(new Set());
 
@@ -2041,7 +2138,7 @@ function RegistrySection() {
     setLoading(true);
     setError(null);
     try {
-      const result: RegistryResult = await (rpc).registry.getRegistry();
+      const result: RegistryResult = await rpc.registry.getRegistry();
       if (result.ok) {
         setListing(result.listing);
       } else {
@@ -2066,7 +2163,7 @@ function RegistrySection() {
       await Promise.all(
         listing.entries.map(async (entry) => {
           if (entry.local || !entry.repo) return;
-          const result: RepoInfoResult = await (rpc).registry.getRepoInfo({
+          const result: RepoInfoResult = await rpc.registry.getRepoInfo({
             repo: entry.repo,
           });
           if (cancelled || !result.ok) return;
@@ -2089,7 +2186,7 @@ function RegistrySection() {
     let cancelled = false;
     (async () => {
       try {
-        const result: RepoReadmeResult = await (rpc).registry.getRepoReadme({
+        const result: RepoReadmeResult = await rpc.registry.getRepoReadme({
           repo: entry.repo,
         });
         if (cancelled) return;
@@ -2119,7 +2216,7 @@ function RegistrySection() {
       setInstalling(entry.name);
       setInstallOutcome(null);
       try {
-        const result: InstallResult = await (rpc).registry.installFromRegistry({
+        const result: InstallResult = await rpc.registry.installFromRegistry({
           name: entry.name,
           description: entry.description,
           repo: entry.repo,
@@ -2192,7 +2289,10 @@ function RegistrySection() {
     async (entry: RegistryEntry, nextEnabled: boolean) => {
       if (!entry.manifestPath) return;
       try {
-        await (rpc as any).installer.togglePlugin(entry.manifestPath, nextEnabled);
+        await (rpc as any).installer.togglePlugin(
+          entry.manifestPath,
+          nextEnabled,
+        );
         await fetchRegistry();
       } catch (err) {
         console.error("[settings] togglePlugin failed:", err);
@@ -2256,9 +2356,13 @@ function RegistrySection() {
             metadata={selectedMetadata}
             readme={selectedReadme}
             installing={installing === selected.name}
-            installDisabled={installing !== null && installing !== selected.name}
+            installDisabled={
+              installing !== null && installing !== selected.name
+            }
             onInstall={() => install(selected)}
-            onToggleEnabled={(nextEnabled) => toggleEnabled(selected, nextEnabled)}
+            onToggleEnabled={(nextEnabled) =>
+              toggleEnabled(selected, nextEnabled)
+            }
             onBack={() => setSelectedName(null)}
             installOutcome={
               installOutcome && installOutcome.name === selected.name
@@ -2451,9 +2555,7 @@ function RegistryCard({
     >
       <div className="flex items-center gap-2 min-w-0">
         <p className="text-sm font-semibold truncate">{displayTitle(entry)}</p>
-        {entry.installed && (
-          <InstalledBadge disabled={!entry.enabled} />
-        )}
+        {entry.installed && <InstalledBadge disabled={!entry.enabled} />}
         {entry.local && (
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 uppercase tracking-wide">
             Local
@@ -2463,13 +2565,13 @@ function RegistryCard({
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
         <span className="truncate">
           {entry.local
-            ? entry.manifestPath ?? "(no manifest)"
+            ? (entry.manifestPath ?? "(no manifest)")
             : metadata?.ownerLogin
               ? `By ${metadata.ownerLogin}`
               : entry.repo.replace(/^https?:\/\/github\.com\//, "")}
         </span>
       </div>
-    
+
       {entry.description && (
         <p className="text-xs text-muted-foreground line-clamp-3 flex-1">
           {entry.description}
@@ -2616,10 +2718,10 @@ function RegistrySidebarItem({
       )}
     >
       <div className="flex items-center gap-1.5 min-w-0">
-        <span className="text-sm font-medium truncate">{displayTitle(entry)}</span>
-        {entry.installed && (
-          <InstalledBadge small disabled={!entry.enabled} />
-        )}
+        <span className="text-sm font-medium truncate">
+          {displayTitle(entry)}
+        </span>
+        {entry.installed && <InstalledBadge small disabled={!entry.enabled} />}
         {entry.local && (
           <span className="text-[9px] px-1 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 uppercase tracking-wide">
             Local
@@ -2628,7 +2730,7 @@ function RegistrySidebarItem({
       </div>
       <div className="text-[11px] text-muted-foreground truncate">
         {entry.local
-          ? entry.manifestPath ?? "(no manifest)"
+          ? (entry.manifestPath ?? "(no manifest)")
           : metadata?.ownerLogin
             ? `By ${metadata.ownerLogin}`
             : entry.repo.replace(/^https?:\/\/github\.com\//, "")}
@@ -2667,9 +2769,7 @@ function InstalledBadge({
         disabled
           ? "bg-muted text-muted-foreground"
           : "bg-blue-500/15 text-blue-600 dark:text-blue-400",
-        small
-          ? "px-1 py-0 text-[8px] h-3.5"
-          : "px-1.5 py-0.5 text-[9px]",
+        small ? "px-1 py-0 text-[8px] h-3.5" : "px-1.5 py-0.5 text-[9px]",
       )}
     >
       {disabled ? "Disabled" : "Installed"}
@@ -2720,9 +2820,7 @@ function RegistryDetail({
           <div className="space-y-1.5">
             <div className="flex items-center gap-2">
               <h2 className="text-2xl font-semibold">{displayTitle(entry)}</h2>
-              {entry.installed && (
-                <InstalledBadge disabled={!entry.enabled} />
-              )}
+              {entry.installed && <InstalledBadge disabled={!entry.enabled} />}
             </div>
             <div className="text-sm text-muted-foreground space-y-0.5">
               <div className="inline-flex items-center gap-1.5">
@@ -2737,7 +2835,7 @@ function RegistryDetail({
                   <button
                     type="button"
                     onClick={() =>
-                      (rpc).window.openExternal(
+                      rpc.window.openExternal(
                         `https://github.com/${metadata.ownerLogin}`,
                       )
                     }
@@ -2752,7 +2850,7 @@ function RegistryDetail({
                   Repository:{" "}
                   <button
                     type="button"
-                    onClick={() => (rpc).window.openExternal(repoHref)}
+                    onClick={() => rpc.window.openExternal(repoHref)}
                     className="text-foreground hover:underline break-all"
                   >
                     {repoHref}
@@ -2812,7 +2910,7 @@ function RegistryDetail({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => (rpc).window.openExternal(repoHref)}
+                onClick={() => rpc.window.openExternal(repoHref)}
                 className="text-xs"
               >
                 <ExternalLinkIcon className="size-3" />
@@ -2867,9 +2965,7 @@ function ReadmePane({
   repoHtmlUrl: string;
 }) {
   if (!readme) {
-    return (
-      <p className="text-sm text-muted-foreground">Loading README…</p>
-    );
+    return <p className="text-sm text-muted-foreground">Loading README…</p>;
   }
   if ("error" in readme) {
     const missing = /no readme/i.test(readme.error);
@@ -2943,7 +3039,7 @@ function ReviewPromptDialog({
   }, [open]);
 
   const onCopy = useCallback(() => {
-    (rpc).window.copyToClipboard(prompt);
+    rpc.window.copyToClipboard(prompt);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }, [prompt, rpc]);
@@ -2952,7 +3048,9 @@ function ReviewPromptDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Review {displayTitle(entry)} before installing</DialogTitle>
+          <DialogTitle>
+            Review {displayTitle(entry)} before installing
+          </DialogTitle>
           <DialogDescription>
             Paste this into your coding agent to audit the plugin's source for
             malicious code and prompt injection before you install.

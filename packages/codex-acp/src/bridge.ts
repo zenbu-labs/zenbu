@@ -34,7 +34,7 @@ type McpServerStdioEntry = {
 };
 
 function isMcpStdio(server: acp.McpServer): server is acp.McpServer & McpServerStdioEntry {
-  return typeof (server as any).command === "string";
+  return typeof (server as { command?: unknown }).command === "string";
 }
 
 function appendMcpServersToConfig(servers: McpServerStdioEntry[]): string[] {
@@ -297,7 +297,7 @@ export function createBridge(opts?: { noLoadSession?: boolean }) {
 
     async unstable_resumeSession(
       params: { sessionId: string; cwd: string; mcpServers?: acp.McpServer[] },
-    ): Promise<any> {
+    ): Promise<Record<string, never>> {
       if (!codex) throw new Error("Not initialized");
 
       const stdioServers = (params.mcpServers ?? []).filter(isMcpStdio);
@@ -493,13 +493,13 @@ export function createBridge(opts?: { noLoadSession?: boolean }) {
 
         case "item/started": {
           const notification = params as ItemStartedNotification;
-          translateItemToUpdate(conn, threadId, notification.item);
+          translateItemToUpdate(conn, threadId, notification.item, "started");
           break;
         }
 
         case "item/completed": {
           const notification = params as ItemCompletedNotification;
-          translateItemToUpdate(conn, threadId, notification.item);
+          translateItemToUpdate(conn, threadId, notification.item, "completed");
           break;
         }
       }
@@ -564,7 +564,16 @@ export function createBridge(opts?: { noLoadSession?: boolean }) {
     conn: acp.AgentSideConnection,
     sessionId: string,
     item: ThreadItem,
+    lifecycle: "started" | "completed",
   ): void {
+    const sessionUpdate =
+      lifecycle === "started" ? "tool_call" : "tool_call_update";
+    const status = translateToolStatus(
+      "status" in item && typeof item.status === "string"
+        ? item.status
+        : undefined,
+    );
+
     switch (item.type) {
       case "userMessage":
       case "agentMessage":
@@ -581,11 +590,11 @@ export function createBridge(opts?: { noLoadSession?: boolean }) {
         conn.sessionUpdate({
           sessionId,
           update: {
-            sessionUpdate: "tool_call",
+            sessionUpdate,
             toolCallId: item.id,
             title: stripShellWrapper(item.command),
             kind: "execute",
-            status: item.status === "completed" ? "completed" : "in_progress",
+            status,
             ...(content.length > 0 ? { content } : {}),
           },
         });
@@ -605,11 +614,11 @@ export function createBridge(opts?: { noLoadSession?: boolean }) {
         conn.sessionUpdate({
           sessionId,
           update: {
-            sessionUpdate: "tool_call",
+            sessionUpdate,
             toolCallId: item.id,
             title,
             kind: "edit",
-            status: item.status === "completed" ? "completed" : "in_progress",
+            status,
             ...(content.length > 0 ? { content } : {}),
           },
         });
@@ -640,11 +649,11 @@ export function createBridge(opts?: { noLoadSession?: boolean }) {
         conn.sessionUpdate({
           sessionId,
           update: {
-            sessionUpdate: "tool_call",
+            sessionUpdate,
             toolCallId: item.id,
             title: `${item.server}/${item.tool}`,
             kind: "execute",
-            status: item.status === "completed" ? "completed" : "in_progress",
+            status,
             ...(mcpContent.length > 0 ? { content: mcpContent } : {}),
           },
         });
@@ -661,6 +670,18 @@ export function createBridge(opts?: { noLoadSession?: boolean }) {
         return "refusal";
       default:
         return "end_turn";
+    }
+  }
+
+  function translateToolStatus(status: string | undefined): acp.ToolCallStatus {
+    switch (status) {
+      case "completed":
+        return "completed";
+      case "failed":
+      case "declined":
+        return "failed";
+      default:
+        return "in_progress";
     }
   }
 

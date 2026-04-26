@@ -1,477 +1,450 @@
 ---
 name: zenbu-codebase
-description: ONLY use when the user explicitly wants to self-modify Zenbu itself (edit the app's source, write/change a Zenbu plugin, use the `zen` CLI), OR when the current working directory is inside `~/.zenbu/plugins/` (any plugin including `~/.zenbu/plugins/zenbu/`). Do NOT use for general coding tasks, other projects, or questions that happen to mention Zenbu in passing. When it does apply, read the full SKILL.md first to orient yourself — it indexes key files, directories, services, the `zen` CLI (including `zen init` recipes), and core concepts (loader chain, service system, plugin system, view system, Kyju reactive DB, agent system, advice, mode system, install model).
+description: Use when the user is editing the Zenbu app source, writing or modifying a Zenbu plugin, or invoking the `zen` CLI; or when the working directory is inside `~/.zenbu/plugins/`. Do not use for unrelated coding tasks. The skill indexes the codebase: directory layout, kernel services, the renderer hierarchy, the plugin model (including workspace-scoped plugins), the schema/DB, the advice system, and the `zen` CLI.
 ---
 
 # Zenbu codebase index
 
-Zenbu is an Emacs-inspired Electron desktop app where every piece of the running
-app — including the kernel — is a hot-reloadable plugin. The user clones a git
-repo (`~/.zenbu/plugins/zenbu/`) and modifies any file; dynohot swaps the module
-live without restart.
+Zenbu is an Electron desktop app. The kernel and every feature on top of it
+are written as **plugins**: directories containing a `zenbu.plugin.json`
+manifest plus service / view / schema files. The kernel itself is a plugin
+(`packages/init`), and uses the same registration surface everything else
+does. All TypeScript modules — main process, renderer, agent — hot-reload
+on save (dynohot for the main process, Vite HMR for views).
 
-> Authoritative reference: `~/.zenbu/plugins/zenbu/DOCS.md`. Read it in full
-> the first time you touch anything non-trivial. This file points at specific
-> parts.
-
-## Terminology
-
-| Term | What it refers to |
-|---|---|
-| **layout** / **orchestrator** | The outer React app the Electron window loads. It's not a registered view — it's the root shell that hosts every other view in an iframe, owns tabs/panes/windows/chrome. Lives at `packages/init/src/renderer/views/orchestrator/` (entry: `App.tsx`). |
-| **view** | Any Vite-served React page loaded in an iframe by the orchestrator. Each view has a unique **scope** (string) and registers itself via `ViewRegistryService`. |
-| **scope** | The string identity of a view (`"chat"`, `"settings"`, `"file-viewer"`, …). Used as the key for advice targeting, content scripts, shortcuts, and iframe subdomain isolation. |
-| **chat** | The specific view that renders the agent conversation UI (chat log + composer + minimap). Scope name `"chat"`. Lives at `packages/init/src/renderer/views/chat/`. Everything a user types to an agent flows through here. |
-| **composer** | The Lexical-based text input inside the chat view where the user composes messages to the agent. File: `views/chat/components/Composer.tsx`. See "Lexical / composer" below. |
-| **service** | A `Service` subclass on the main process. Auto-exposed over RPC by its `static key`. |
-| **plugin** | A directory with a `zenbu.plugin.json` manifest. Contributes services, views, schemas, advice. The kernel is itself a plugin (`packages/init/`). |
-| **section** | A plugin's slice of the Kyju root DB: `root.plugin.<plugin-name>.*`. Declared by the plugin's `schema.ts` + manifest `schema` field. |
-| **advice** | Emacs-style function interception. A plugin can replace/wrap a top-level function exported from any view without editing the target. |
-
-## Repository layout
+## 1. Mental model
 
 ```
-~/.zenbu/
-├── config.jsonc                     # lists plugin manifests to load
-├── registry/                        # generated; zen link writes these
-│   ├── services.ts                  # typed ServiceRouter across all services
-│   └── db-sections.ts               # typed DbRoot across all plugin sections
+~/.zenbu/                               ← user-local install root
+├── config.jsonc                        ← lists plugin manifest paths
+├── registry/                           ← `zen link` writes typed barrels here
+│   ├── services.ts                     ← typed ServiceRouter
+│   ├── db-sections.ts                  ← typed DbRoot
+│   └── preloads.ts
 └── plugins/
-    ├── zenbu/                       # the main monorepo (kernel + tooling)
-    │   ├── apps/kernel/             # Electron shell (only precompiled code)
-    │   ├── packages/                # see below
-    │   ├── registry.jsonl           # plugin catalog (name, description, repo)
-    │   ├── DOCS.md                  # full architecture doc
-    │   └── packages/init/setup.ts   # idempotent first-run installer (run via bun)
-    └── <third-party plugins>/       # each with its own zenbu.plugin.json
+    ├── zenbu/                          ← the kernel monorepo (this repo)
+    └── <other-plugins>/                ← third-party plugins (independent repos)
 ```
 
-## Packages you will touch most
+The runtime architecture, top-down:
 
-| Package | What it is | Start here |
+1. **Electron shell** (`apps/kernel/src/shell/`) — only precompiled code.
+   Reads `config.jsonc`, registers the loader chain
+   (zenbu virtual-module loader → tsx → advice transform → dynohot HMR),
+   then dynamic-imports the virtual `zenbu:plugins` module. That module
+   is generated from `config.jsonc` and side-effect-imports each plugin's
+   service files.
+2. **Service runtime** (`packages/init/src/main/runtime.ts`) —
+   a `ServiceRuntime` singleton on `globalThis`. Each plugin file does
+   `runtime.register(MyService, import.meta.hot)` at module bottom.
+   Dependencies form a DAG; effects run on first evaluate and re-run on
+   hot reload.
+3. **Kyju DB** (`packages/kyju`) — reactive SQLite-backed database
+   replicated over a WebSocket to every renderer. Schema is composed
+   from per-plugin sections at `root.plugin.<plugin-name>.*`. Reads /
+   writes from main are imperative; reads from the renderer go through
+   `useDb(selector)`.
+4. **Renderer** — every UI is a Vite-served React page loaded as an
+   iframe. Each iframe opens one WebSocket back to the kernel that
+   multiplexes RPC and DB-replica frames. Iframes are isolated per tab
+   subdomain (`tabid.localhost:<wsPort>`), so cookies / localStorage
+   don't collide.
+
+The renderer hierarchy that the user sees:
+
+```
+Orchestrator (root, full window)
+├── TitleBar (top, full width)
+└── flex-row
+    ├── WorkspaceSidebar (vertical icon rail of user workspaces)
+    └── Workspace iframe (one per active workspace, cached)
+        ├── AgentList (left, agent rows filtered by workspace cwds)
+        ├── chat / new-agent / plugins iframe (center, the active tab)
+        └── Utility sidebar (right: rail of icons + optional panel)
+```
+
+Tabs in a pane can be one of:
+
+- A real chat session — `tabId === sessionId`, routes to scope `chat`.
+- A `new-agent:<nanoid>` sentinel — a transient onboarding view for
+  picking a cwd before promoting to a real agent. Routes to scope
+  `new-agent`.
+- A `scope:<name>:<nanoid>` sentinel — opens an arbitrary registered
+  view (e.g. `scope:plugins:...` for the plugin manager).
+
+## 2. Repository layout
+
+```
+packages/init                  THE kernel plugin: services, schema, renderer
+  shared/
+    schema/index.ts            kernel DB schema (workspaces, windows, agents…)
+    agent-ops.ts               pure agent-list helpers
+  src/main/
+    runtime.ts                 ServiceRuntime, Service base class, DAG init
+    services/                  every file is a Service subclass
+    preload.ts                 startup preload hooks
+  src/renderer/
+    lib/
+      ws-connection.ts         WebSocket multiplexer (rpc + db channels)
+      kyju-react.ts            useDb / useCollection
+      providers.ts             useRpc / useKyjuClient
+      view-cache.tsx           ViewCacheSlot — iframe cache + projection
+      shortcut-handler.ts      useShortcutHandler
+      drag-region.ts           useDragRegion (window drag through iframes)
+    views/
+      orchestrator/            root window UI
+      workspace/               per-workspace UI (agent list + chat + util)
+      chat/                    chat conversation UI
+      new-agent/               cwd picker + composer onboarding view
+      plugins/                 plugin manager view
+      composer-debug/          dev-only composer debug view
+      …
+    vite.config.ts             the "core" multi-page Vite config
+
+packages/agent                 ACP client + Agent abstraction (Effect-based)
+packages/kyju                  reactive DB primitives + schema DSL
+packages/advice                Babel transform + runtime for function interception
+packages/dynohot               ESM HMR (rewrites imports to live proxies)
+packages/zenrpc                typed RPC over WebSocket
+packages/zen                   the `zen` CLI
+packages/claude-acp / codex-acp / mock-acp
+                               ACP bridges to specific LLM CLIs
+apps/kernel                    Electron shell (precompiled boot loader)
+```
+
+Authoritative deeper reference: `~/.zenbu/plugins/zenbu/DOCS.md`.
+
+## 3. The plugin model
+
+A plugin is a directory with a `zenbu.plugin.json`. Minimum manifest:
+
+```json
+{
+  "name": "my-plugin",
+  "services": ["src/services/*.ts"]
+}
+```
+
+Optional fields the kernel reads:
+
+| Field | Purpose |
+|---|---|
+| `services` | Glob (or list of paths) of service files. Each is side-effect-imported and registers itself. |
+| `schema` | Path to a `createSchema(...)` module → defines this plugin's DB section at `root.plugin.<name>.*`. |
+| `migrations` | Path to a generated migrations index (created by `zen kyju generate`). |
+| `setup` | `{ "script": "./setup.ts", "version": <int> }` — one-time host setup, run via the bundled `bun`. Bumping `version` re-runs it. |
+| `preload` | Module whose default-async-export runs **before** plugin services evaluate. Result is read with `getPreload(name)`. |
+| `requiredVersion` | Semver range; if the kernel is older the boot window shows a kernel-upgrade screen. |
+
+The kernel itself uses this surface — its manifest is
+`packages/init/zenbu.plugin.json`.
+
+### Two ways to install a plugin
+
+1. **Globally**, via `~/.zenbu/config.jsonc`. The plugin's services
+   load eagerly at boot and stay loaded for the lifetime of the app.
+   This is how kernel and most third-party plugins are installed.
+2. **Per workspace**, via a `.zenbu/zenbu.plugin.json` (or
+   `.zenbu/<sub>/zenbu.plugin.json`) in any of the workspace's cwds.
+   These plugins are **lazy**: they load when the workspace becomes
+   active and unload when it deactivates. Their advice and views only
+   apply to that workspace's iframe.
+
+## 4. Workspaces
+
+Schema fields (kernel root):
+
+```ts
+workspaces:               { id, name, cwds: string[], createdAt, icon }[]
+activeWorkspaceByWindow:  Record<windowId, workspaceId>
+sidebarOpenByWindow:      Record<windowId, boolean>
+lastTabByWorkspace:       Record<workspaceId, tabId>
+utilitySidebarSelectedByWindow: Record<windowId, scope>
+```
+
+A workspace is an **explicit, user-created entity** with a name and one
+or more cwds. It is **not** auto-derived from anything. The
+`WorkspaceService` (`packages/init/src/main/services/workspace.ts`)
+exposes:
+
+- `createWorkspace(name, cwds)` — inserts a row, kicks off icon scan.
+- `deleteWorkspace(id)` — unloads scoped plugins, removes the row.
+- `activateWorkspace(windowId, workspaceId)` — atomically:
+  1. Deactivates the previous workspace for this window (unloads its
+     plugins if no other window still has it active).
+  2. Sets `activeWorkspaceByWindow[windowId] = workspaceId`.
+  3. Restores `pane.activeTabId` to that workspace's last-viewed tab
+     (`lastTabByWorkspace[workspaceId]` if still in the pane and the
+     agent's cwd matches; otherwise the most-recent tab in this
+     workspace's cwds).
+  4. Loads any `.zenbu/zenbu.plugin.json` plugins discovered in the
+     workspace's cwds, tagged with the workspace id.
+- `ensureWorkspaceIcon(workspaceId)` — best-effort favicon scan
+  (Next.js `app/icon.svg`, `public/favicon.ico`, etc.) that stores
+  the bytes as a kyju blob and writes `workspace.icon`.
+- `setWorkspaceIcon(workspaceId, blobId, origin)` — user override.
+  `origin: "override"` always wins over `"scanned"`.
+
+Workspace tracking — written by the workspace iframe whenever its
+active tab changes:
+
+```
+lastTabByWorkspace[currentWorkspaceId] = pane.activeTabId
+```
+
+(non-sentinel only; `new-agent:` and `scope:` tabs are skipped).
+
+## 5. Service runtime
+
+`Service` (in `packages/init/src/main/runtime.ts`):
+
+```ts
+export class MyService extends Service {
+  static key = "my-service"               // RPC namespace
+  static deps = { db: DbService }         // resolved DAG-style
+  declare ctx: { db: DbService }
+
+  evaluate() {
+    // Idempotent — re-runs on hot reload. State on `this` survives.
+    this.setup("interval", () => {
+      const id = setInterval(() => {}, 1000)
+      return () => clearInterval(id)      // cleanup on re-eval / shutdown
+    })
+  }
+
+  // Public methods are auto-exposed as `rpc.my-service.<method>`
+  async hello(name: string) { return `hi ${name}` }
+}
+
+runtime.register(MyService, (import.meta as any).hot)
+```
+
+Rules:
+
+- **`evaluate()` must be idempotent.** Hot reload calls it again on the
+  same instance. Guard side-effectful resource creation with `if`s, or
+  put it in `setup()`.
+- **`setup(key, fn)` is the equivalent of `useEffect` for services.**
+  The cleanup runs before the next `setup(key, …)` and on shutdown.
+- **Public method = RPC method.** Anything not starting with `_` and
+  not on `Service.prototype` becomes `rpc.<key>.<methodName>`. Run
+  `zen link` after adding/removing public methods.
+- **Optional dependencies** via `optional(OtherService)` from
+  `runtime.ts`. `ctx.other` is `undefined` if the service isn't
+  registered.
+- **Workspace-scoped registration** uses
+  `runtime.scopedImport(workspaceId, importFn)`. Any `register()` call
+  inside the import inherits that workspace id. The runtime tags the
+  ServiceSlot, lets `unregisterByWorkspace(workspaceId)` tear them
+  down later. Workspace plugins don't need to know about this — they
+  call plain `runtime.register(...)`; the kernel's `WorkspaceService`
+  wraps the dynamic import in `scopedImport`.
+
+## 6. Renderer
+
+Every view is a Vite-served React page loaded inside an iframe.
+
+| View | Scope | Where |
 |---|---|---|
-| `packages/init` | **The main plugin.** All core services + the React renderer. | `src/main/services/`, `src/renderer/` |
-| `packages/agent` | ACP client + Agent abstraction (Effect-based). Skills live here. | `src/agent.ts`, `src/skills/` |
-| `packages/kyju` | Reactive SQLite-backed DB with cross-process replication. | `src/v2/db/`, `src/v2/client/` |
-| `packages/advice` | Emacs-style function interception (Babel transform + runtime). | `src/node-loader.ts`, `src/runtime/` |
-| `packages/dynohot` | ESM HMR. Rewrites imports into live proxies. | (rarely edited) |
-| `packages/zenrpc` | Typed RPC over WebSocket. | `src/` |
-| `packages/claude-acp`, `packages/codex-acp`, `packages/mock-acp` | ACP bridges to specific LLM backends | — |
-| `packages/zen` | The `zen` CLI (hot-editable). | `src/bin.ts` |
-| `packages/ui` | Shared React primitives. | — |
+| Orchestrator (root) | `orchestrator` | `views/orchestrator/` |
+| Workspace container | `workspace` | `views/workspace/` |
+| Chat conversation | `chat` | `views/chat/` |
+| New-agent onboarding | `new-agent` | `views/new-agent/` |
+| Plugin manager | `plugins` | `views/plugins/` |
 
-## The `zen` CLI — your main tool for plugin work
+All five share one Vite dev server (the "core" server). They are
+multi-page entries in `views/.../vite.config.ts` and registered as
+aliases via `ViewRegistryService.registerAlias(scope, "core", "/views/<name>")`.
+Plugins that want their own view source tree can call
+`ViewRegistryService.register(scope, root, configFile, meta?)` instead,
+which spins up a dedicated Vite dev server.
 
-Source: `packages/zen/src/`. Shim at `~/.zenbu/bin/zen`. Hot-editable; edits
-to `packages/zen/src/**/*.ts` take effect on the next `zen` invocation.
+`meta: { sidebar: true }` makes a registered view appear as an icon in
+the workspace's right utility sidebar.
 
-### Fast path: create a new plugin
+### Iframe wiring
+
+`ViewCacheSlot` (`lib/view-cache.tsx`) is the only correct way to
+render a view iframe in another view's React tree. It maintains a
+process-wide cache of `<iframe>` elements parented to a
+fixed-position body-level container, then projects each iframe onto
+the calling slot's bounding rect. Reparenting would reload the iframe;
+caching avoids that. The slot accepts an optional `iframeStyle` prop —
+useful for things like `borderRadius` that the placeholder div can't
+clip (the iframe lives outside the slot's DOM subtree).
+
+### Reading and writing state
+
+Inside any view:
+
+```ts
+const rpc = useRpc()              // typed rpc from #registry/services
+const client = useKyjuClient()    // imperative kyju client
+const ws = useDb(root => root.plugin.kernel.windowStates)
+                                  // reactive selector subscription
+```
+
+`useDb` selectors run on every committed change and only re-render
+when the selected value differs (`Object.is`). Always do `.find` /
+filter inside the selector, not after — outside selectors lose their
+element types.
+
+### Title bar behaviour
+
+The orchestrator's title bar lives at the top of the window and is
+draggable (macOS traffic lights at `(20, 20)`). Inside it: a
+sidebar-toggle, reload menu, and an agent picker. The chat view has
+its own thin title bar (`project / summary` + a sidebar-toggle that
+appears only when the workspace's agent list is collapsed). Above the
+chat content, a 16px linear-gradient band fades scrolled content into
+the chrome.
+
+## 7. Schema and DB
+
+The kernel schema is at `packages/init/shared/schema/index.ts`. Notable
+fields:
+
+- `workspaces`, `activeWorkspaceByWindow`, `lastTabByWorkspace`,
+  `sidebarOpenByWindow`, `utilitySidebarSelectedByWindow` — workspace
+  state.
+- `windowStates[*]` — pane / session layout per window. Sessions =
+  `{ id (== tabId), agentId, lastViewedAt }`. Panes = leaf | split.
+- `viewRegistry` — snapshot synced from `ViewRegistryService`.
+- `composerDrafts`, `composerPending` — chat composer state.
+- Spread from `agentSchemaFragment` (in `packages/agent/src/schema.ts`):
+  `agents`, `agentConfigs`, `archivedAgents`, `hotAgentsCap`,
+  `skillRoots`. Read/write at `root.plugin.kernel.<field>`.
+
+Per-plugin sections live at `root.plugin.<plugin-name>.*`. Each plugin
+that wants storage declares its own `schema.ts`, runs
+`zen kyju generate` to emit a migration into its `kyju/` dir, then
+`zen link` to plumb the types into `~/.zenbu/registry/db-sections.ts`.
+
+Inspect the on-disk DB:
 
 ```bash
-zen init my-plugin                                  # minimal: one service
-zen init my-plugin --with db                        # + kyju section
-zen init my-plugin --with shortcut                  # + keyboard shortcut
-zen init my-plugin --with advice                    # + component wrap/replace
-zen init my-plugin --with view                      # + Vite-served React view
-zen init my-plugin --with db,shortcut,advice,view   # compose any combo
-zen init my-plugin --preset mega                    # all recipes at once
-zen init my-plugin --dir /path/to/elsewhere
+zen kyju db --db /path/to/.zenbu/db root
 ```
 
-`zen init` does all of the following in one shot:
+(Default kernel DB path is
+`packages/init/.zenbu/db` when the dev kernel is running.)
 
-1. Scaffolds the **base layer** from `packages/zen/templates/plugin/base/`
-   (manifest, package.json, tsconfig + tsconfig.local.json, setup.ts,
-   README, .gitignore, one service stub). Then overlays any
-   **recipe layers** from `packages/zen/templates/plugin/recipes/<recipe>/`.
-   `zenbu.plugin.json` and `package.json` are generated programmatically so
-   fields and deps reflect the selected recipes.
-2. Runs the scaffolded `setup.ts` via the bundled bun (isolated pnpm).
-3. Registers the plugin in `~/.zenbu/config.jsonc` — over RPC if the app is
-   running, or writes the file directly if offline.
-4. Runs `zen link` so the new plugin's service + schema types show up in
-   `~/.zenbu/registry/{services,db-sections}.ts`.
+## 8. Advice and content scripts
 
-After `zen init` the plugin is live. Edit `src/services/<name>.ts` and
-dynohot hot-swaps on save; views/advice code pick up through Vite HMR.
+The advice transform rewrites every top-level function in any view's
+source so that calls go through a per-`(moduleId, name)` chain. A
+plugin can then `replace`, `before`, `after`, or `around` any of those
+functions without touching the source file.
 
-**Recipes** — each is a self-contained template overlay, composable in any
-combination. See `packages/zen/src/commands/init.ts` (`RECIPES`, `PRESETS`)
-and `packages/zen/templates/plugin/recipes/<name>/` for the source of truth.
+Server-side API (`packages/init/src/main/services/advice-config.ts`):
 
-| Recipe | Adds | Use when |
-|---|---|---|
-| `db` | `src/schema.ts`, `kyju.config.ts`, `kyju/index.ts`; manifest `schema` + `migrations` fields | Plugin owns its own DB section (`root.plugin.<name>.*`) |
-| `shortcut` | `src/services/shortcuts.ts` that calls `ShortcutService.register` | Plugin needs a keyboard binding |
-| `advice` | `src/services/advice.ts` + `src/replacements/sample-wrapper.tsx`; calls `registerAdvice` | Plugin replaces/wraps a component in an existing view |
-| `view` | `vite.config.ts`, `src/view/{index.html,main.tsx,App.tsx}`, `src/services/view.ts` that calls `ViewRegistryService.register` | Plugin ships its own Vite-served view |
+```ts
+registerAdvice(scope, {
+  moduleId: "views/orchestrator/App.tsx",   // path relative to the view's Vite root
+  name: "OrchestratorContent",
+  type: "around",
+  modulePath: "/abs/path/wrapper.tsx",
+  exportName: "Wrapper",
+})
 
-To add a new recipe: drop a new dir under `packages/zen/templates/plugin/recipes/<name>/`
-mirroring the output structure, add the name to `RECIPES` in `init.ts`,
-and (if it needs new deps or manifest fields) extend `buildPackageJson` /
-`buildManifest` in the same file.
+registerContentScript(scope, "/abs/path/script.tsx")
+```
 
-### Subcommand reference
+`scope` is the view's scope string (`"chat"`, `"orchestrator"`, …),
+or `"*"` for content scripts that should load everywhere.
+
+**Workspace-scoped advice.** When a workspace plugin registers
+advice, the registration is automatically tagged with that workspace's
+id (read from `runtime.getActiveScope()` during the service's
+`evaluate()`). The advice prelude generator filters by workspace so
+that:
+
+- Global views (orchestrator, workspace sidebar) get only global
+  advice.
+- The workspace iframe and its descendants (chat, new-agent, etc.)
+  get global advice + advice from the active workspace's plugins.
+
+Provenance flows through the iframe URL: every iframe rendered inside
+the workspace iframe carries `?workspaceId=<id>`, and the advice
+prelude endpoint reads that query param and passes it to
+`getAdvice(scope, workspaceId)`.
+
+## 9. The `zen` CLI
+
+Source: `packages/zen/src/`. Shim: `~/.zenbu/bin/zen`. Hot-editable:
+edits to `packages/zen/src/**/*.ts` apply on the next invocation.
+
+### Common subcommands
 
 | Command | What it does |
 |---|---|
-| `zen` | Open a Zenbu window. Talks to the running app over zenrpc via `runtime.json` (WS port + pid); if nothing's running, spawns the Electron binary. |
-| `zen [--agent <name>] [--resume] [--blocking]` | Same, with window-open flags. |
-| `zen init <name> [--dir X]` | Scaffold a new plugin and register it. See above. |
-| `zen setup [--dir .] [--reason "..."]` | Re-run a plugin's `setup.ts` via the bundled bun. If the app is running and the plugin is loaded, asks the UI to confirm a relaunch (pass `--reason` to display in the modal). |
-| `zen link` | Regenerate `~/.zenbu/registry/{services,db-sections}.ts`. Run from any plugin dir; merges with other plugins' entries. |
-| `zen kyju generate [--name tag]` | Diff current schema vs last snapshot, emit a migration + snapshot + journal entry. Run from a dir with a `kyju.config.ts`. |
-| `zen kyju db <root\|collections\|collection\|...>` | Inspect the on-disk DB. |
-| `zen doctor` | Re-run the kernel's `setup.ts` idempotently. Use after `git pull` pulls new setup steps, or after clearing `~/Library/Caches/Zenbu/`. |
-| `zen config <get\|set> <key> [value]` | Read/write the zen-cli kyju section (`appPath` today). |
+| `zen` | Open a Zenbu window. Talks to the running app over zenrpc via `runtime.json`; spawns the Electron binary if not running. |
+| `zen init <name>` | Scaffold a new plugin and register it in `config.jsonc`. |
+| `zen init <name> --with db,view,advice,shortcut` | Scaffold with composable recipes (`packages/zen/templates/plugin/recipes/<name>/`). |
+| `zen setup [--dir .]` | Re-run a plugin's `setup.ts`. If the app is running, surfaces a relaunch confirmation. |
+| `zen link` | Regenerate `~/.zenbu/registry/{services,db-sections,preloads}.ts`. Run from any plugin dir. |
+| `zen kyju generate [--name tag]` | Diff schema against last snapshot, emit migration. |
+| `zen kyju db --db <path> <root \| collections \| collection \| ...>` | Inspect on-disk DB. |
+| `zen doctor` | Re-run kernel `setup.ts` idempotently. Use after pulling new setup steps. |
+| `zen config <get \| set> <key> [value]` | Read/write the zen-cli kyju section. |
 
-### "I want to … → run …"
+### Common workflows
 
 | After this change | Run |
 |---|---|
-| Added/removed a public method on a `Service` | `zen link` (from the plugin dir) |
-| Added/removed a whole service file | `zen link` |
-| Edited a `createSchema({...})` field | `zen kyju generate` **then** `zen link` |
-| Changed `package.json` (new dep, version bump) | `zen setup --dir <plugin>`; confirm the Relaunch modal |
-| Changed `setup.ts` steps and want them re-run | Bump `setup.version` in the manifest, then `zen setup` |
-| Edited any service/view/component source | Nothing — dynohot + Vite HMR pick it up |
-| Cleared `~/Library/Caches/Zenbu/` or pulled a new core setup step | `zen doctor` |
+| Edited a service / view / component source | nothing — dynohot or Vite HMR picks it up |
+| Added or removed a public Service method | `zen link` |
+| Added or removed a service file | `zen link` |
+| Edited a `createSchema(...)` field | `zen kyju generate` then `zen link` |
+| Changed `package.json` (new dep / version) | `zen setup --dir <plugin>` |
+| Bumped `setup.version` to re-run setup | `zen setup` |
+| Cleared `~/Library/Caches/Zenbu/` | `zen doctor` |
 
-### Cases to consider when scaffolding
+## 10. Conventions
 
-- **Plugin name.** Must match `/^[a-z][a-z0-9-]*$/` (kebab-case). It becomes
-  the `name` in the manifest, the kyju section key, the RPC namespace, and
-  the service file name (`src/services/<name>.ts`). Derived variants used in
-  templates: `PascalName`, `camelName`.
-- **Dependencies.** The template ships `effect`, `nanoid`, `zod`. Add more
-  to `package.json`, then `zen setup` — template uses
-  `pnpm install --no-frozen-lockfile` so new deps don't fail on a stale
-  lockfile.
-- **Schema.** The stub has a `createSchema({ exampleCount, notes })`. After
-  editing, you *must* `zen kyju generate` before the new field reads/writes
-  work; and `zen link` so the type flows to `useDb()` callers.
-- **Loading order.** Adding to `~/.zenbu/config.jsonc` triggers the zenbu
-  loader to re-evaluate and import the new plugin. This happens within
-  seconds of `zen init` — no restart unless `setup.ts` changed
-  `node_modules`, which only matters on later `zen setup` calls (the first
-  install happens before the plugin is loaded).
-- **Restart prompts.** The frontend `CliRelaunchModal`
-  (`packages/init/src/renderer/views/orchestrator/components/CliRelaunchModal.tsx`)
-  subscribes to `events.cli.relaunchRequested`. `zen setup` surfaces its
-  `--reason` string verbatim in that modal.
-- **Third-party plugin checked into `~/.zenbu/plugins/<name>/`.** Not
-  required — plugins can live anywhere; the config entry is an absolute path
-  to the manifest. `zen init` puts them wherever `--dir` says.
+- **Don't start the dev server.** Assume it's already running; it
+  hot-reloads on save (main process included). If you break a file the
+  app breaks. Make incremental edits that leave the system in a valid
+  state at every save.
+- **Use `ni`** to install npm packages (auto-detects pnpm/npm/bun).
+  For plugin deps prefer `zen setup` so the relaunch bridge fires.
+- **Plugin names** are kebab-case `/^[a-z][a-z0-9-]*$/`. Used as the
+  schema section key, RPC namespace, and service file name.
+- **No module-level mutable state in services.** Use `setup()`. Hot
+  reload re-runs `evaluate()` on the same instance — module-level
+  state survives but won't reflect the new code.
+- **Avoid `as any`.** The DB section types and RPC types are
+  generated; cast through proper types or fix the schema.
+- **Comments and commit messages are instructions for future merge
+  agents.** Pull conflicts will be resolved by an LLM reading the
+  history; explicit intent matters.
 
-### Recipes — concrete pointers for common plugin tasks
+## 11. Where third-party plugins live
 
-Each recipe names the **one file to open first**. Read that, mirror the
-pattern.
+`~/.zenbu/plugins/<name>/` — each is a standalone repo with its own
+`zenbu.plugin.json`. Currently installed plugins are listed in
+`~/.zenbu/config.jsonc`. The `zenbu` directory under there is the
+kernel monorepo (this repo) — don't confuse it with a user plugin.
 
-**Register a keyboard shortcut.**
-- Primitive: `ShortcutService.register({ id, defaultBinding, scope?, handler? })`
-  in `packages/init/src/main/services/shortcut.ts:53`.
-- Canonical example: `packages/init/src/main/services/focus-shortcuts.ts:14-61` —
-  two registrations with handlers. Copy the structure.
-- `scope` is a string matching a view scope (e.g. `"chat"`, `"orchestrator"`);
-  omit for a global shortcut. Dispatch happens automatically — handlers run
-  on the main process, or renderer-side via `useShortcutHandler({ scope, id })`
-  in `packages/init/src/renderer/lib/shortcut-handler.ts:126` when you need
-  DOM access.
-- Key-combo syntax: modifiers + key, e.g. `"cmd+b"`, `"cmd+shift+k"`,
-  `"cmd+/"`. See the kernel file above for the full grammar.
+Existing plugins with useful patterns to copy:
 
-**Read or write application state.**
-- Kernel schema (almost everything — sidebar, panes, views, modes, etc.):
-  `packages/init/shared/schema/index.ts` (194 lines; fields listed at the
-  top of the file).
-- **Agent state lives in a separate schema.** `packages/agent/src/schema.ts`
-  exports `agentSchemaFragment` + `agentSchema`. The kernel schema spreads
-  `agentSchemaFragment` into its root, so `agents`, `agentConfigs`,
-  `archivedAgents`, `hotAgentsCap`, `skillRoots` appear at
-  `root.plugin.kernel.<field>`. Read/write agent fields there.
-- From a service: `this.ctx.db.client.readRoot().plugin.kernel.foo` and
-  `this.ctx.db.client.update(root => { root.plugin.kernel.foo = ... })`.
-- From a view: `useDb(root => root.plugin.kernel.foo)`.
+- `~/.zenbu/plugins/minimap/` — the smallest possible plugin
+  (one advice replacement).
+- `~/.zenbu/plugins/commit-button/` — service + advice + RPC.
+- `~/.zenbu/plugins/recent-agents/` — content script, shortcut,
+  schema section.
+- `~/.zenbu/plugins/quick-chat/` — advice that wraps
+  `OrchestratorContent`, opens a floating window.
 
-**Find where a view is rendered or its components live.**
-- Orchestrator root + tab/pane layout: `packages/init/src/renderer/views/orchestrator/App.tsx`.
-- Chat view (composer, display, combobox, shortcuts input):
-  `packages/init/src/renderer/views/chat/`.
-- Agent switcher combobox component: `packages/init/src/renderer/views/chat/components/Composer.tsx:285-356` (`AgentConfigCombobox`).
-- Settings view: `packages/init/src/renderer/views/settings/`.
+## 12. Portability
 
-**Reuse an existing minimal plugin as a template.**
-- Tiniest service-only plugin: `~/.zenbu/plugins/minimap/src/services/minimap.ts`
-  (26 lines — one advice replacement).
-- Service + advice + RPC: `~/.zenbu/plugins/commit-button/src/services/commit-button.ts`
-  (~100 lines).
-
-**Where user (third-party) plugins live.** `~/.zenbu/plugins/<name>/` — each a
-standalone repo with its own `zenbu.plugin.json`. Current installs:
-`claude-plans, code-review, commit-button, event-log-viewer, file-viewer,
-ghostty-terminal, git-viewer, injections, left-sidebar, minimap,
-plan-comments, plan-viewer, recent-agents, sidebar, tab-orchestrator,
-vercel-viewer`. The `zenbu` dir under there is the kernel monorepo — don't
-confuse it with a user plugin.
-
-**Replace or wrap a component without forking.** Use `registerAdvice(scope, {
-moduleId, name, type: "replace" | "around", modulePath, exportName })` from
-`packages/init/src/main/services/advice-config.ts`. The `moduleId` is the
-target file's path relative to the view's Vite root
-(`packages/init/src/renderer/`).
-
-**Inject a content script into a view.** `registerContentScript(scope,
-absolutePath)` from the same file. Scope `"*"` targets every view.
-
-### Understand the view system (scopes, iframes, subdomains, sockets)
-
-- **`ViewRegistryService`** — `packages/init/src/main/services/view-registry.ts`.
-  `register(scope, root, configFile?)` spins a Vite dev server for the
-  view's source directory and stores `scope → { url, port }`. Registry
-  snapshot syncs to `root.plugin.kernel.viewRegistry` (lines 133-149).
-  `registerAlias(scope, reloaderId, pathPrefix)` reuses an existing server
-  at a subpath — what most kernel views do on the shared `"core"` server.
-- **How the orchestrator mounts a view.** `orchestrator/components/LeafPane.tsx:435-461`
-  renders `<iframe src="http://${hostname}.localhost:${wsPort}${chatPath}/index.html?wsPort=${wsPort}&windowId=...&paneId=...">`.
-  The host is derived from the tab id (`tabId.toLowerCase().replace(/[^a-z0-9]/g, "")`),
-  giving each tab a **unique subdomain** under `.localhost` — every iframe
-  gets its own Origin, so cookies / localStorage / postMessage targets
-  don't collide.
-- **Kernel HTTP server is a single port** (the `wsPort` from
-  `runtime.json`) proxying every subdomain to the right Vite server based
-  on the URL path. `packages/init/src/main/services/http.ts` + `server.ts`.
-- **Views talk back on one WebSocket.** `packages/init/src/renderer/lib/ws-connection.ts:46-109`
-  opens `ws://127.0.0.1:${wsPort}` and muxes two channels over it:
-  `{ ch: "rpc", data }` (zenrpc) and `{ ch: "db", data }` (Kyju replica
-  events). Mirror this exact shape if you need a non-view process to
-  connect — `packages/zen/src/lib/rpc.ts` is the canonical Node example.
-- **Views don't know about each other directly.** They coordinate through
-  the DB (write to `viewRegistry` / modes / shared fields) and through
-  shortcut dispatches + RPC events. No `postMessage` bus.
-- **Tab / pane / window model.** Layout is stored on the kernel schema
-  (`windowStates[*].panes`, `rootPaneId`, `focusedPaneId`). The
-  orchestrator reads this and decides which scope goes in which iframe —
-  `App.tsx` picks the leaves, `LeafPane.tsx` renders them.
-
-### Extend / edit the chat composer (Lexical)
-
-**Composer.tsx is where agent input is composed.** Path:
-`packages/init/src/renderer/views/chat/components/Composer.tsx` (626
-lines). The `<LexicalComposer>` config at lines 195-201 declares
-`nodes: [FileReferenceNode, ImageNode]`; children are the active
-Lexical plugins (`HistoryPlugin`, `FilePickerPlugin`, `ImagePastePlugin`,
-`DraftPersistencePlugin`, `SlashCommandPlugin`, `CtrlNPPlugin`,
-`RichPastePlugin`). Adding a new feature almost always means adding a
-new plugin component to that list.
-
-**Lexical plugin = a React component that calls `useLexicalComposerContext()`
-and registers effects / commands.** Three representative examples:
-- `views/chat/plugins/FilePickerPlugin.tsx` — wraps
-  `LexicalTypeaheadMenuPlugin`, matches a `/` trigger, renders the
-  picker, dispatches insert commands on selection.
-- `views/chat/plugins/ImagePastePlugin.tsx` — registers `PASTE_COMMAND`,
-  detects image MIME types in the clipboard, creates an `ImageNode` and
-  uploads to blob storage.
-- `views/chat/plugins/DraftPersistencePlugin.tsx:26-50` — debounced hook
-  that serialises editor state every 300ms into
-  `root.plugin.kernel.composerDrafts[agentId]`.
-
-**Key event handling & preventing defaults.** Register with
-`editor.registerCommand(COMMAND, handler, PRIORITY)` and **return `true`**
-to consume the event; the handler should also call `event.preventDefault()`
-when appropriate. Canonical example: `Composer.tsx:102-127` handles
-`KEY_ENTER_COMMAND` at `COMMAND_PRIORITY_HIGH`, checks refs for
-open menus (so Enter selects instead of submitting), and returns `true`
-to stop propagation. When adding new keybindings in the composer:
-- Use `COMMAND_PRIORITY_HIGH` (not `LOW`) so you run before default text
-  handlers when you need to intercept.
-- If a menu is open, always stop Enter/Arrow/Tab from reaching the editor.
-- Never swallow keys conditionally without an early-return guard — a half-
-  consumed event will desync the IME / selection.
-
-**`Ctrl+N` / `Ctrl+P` as Down/Up — always.** Users expect emacs-style
-arrow navigation inside any menu / typeahead in the composer. The
-reusable primitive is `CtrlNPPlugin` at
-`views/chat/plugins/KeyboardPlugins.tsx:15-45`: registers one
-`KEY_DOWN_COMMAND` handler that converts `Ctrl+n` → dispatch
-`KEY_ARROW_DOWN_COMMAND`, `Ctrl+p` → `KEY_ARROW_UP_COMMAND`. Any new
-typeahead/menu in the composer inherits the behaviour for free.
-
-**Custom decorator nodes (React inside the editor).** Subclass
-`DecoratorNode`, implement `getType`, `clone`, `createDOM`, `decorate`,
-`exportJSON`, `static importJSON`. Canonical: `FileReferenceNode.tsx` and
-`ImageNode.tsx` in `views/chat/lib/`. **To avoid layout shift when the
-component mounts** set `display: "inline"` on the DOM element returned by
-`createDOM()` (see `FileReferenceNode.tsx:46-49` and `ImageNode.tsx:46-49`).
-Nodes that change height dynamically will shift the caret and scroll the
-chat — always lock the line box with a fixed height or `line-height`.
-
-**Store metadata on nodes.** The constructor + `exportJSON` +
-`importJSON` is the full API. Examples:
-- `FileReferenceNode` (`views/chat/lib/FileReferenceNode.tsx:87-99`)
-  persists `filePath`, `fileName`, `fileContent`.
-- `MentionNode` (`views/chat/lib/MentionNode.tsx:52-62`) persists
-  `mentionType`, `label`. Version bumping is declarative — increment the
-  `version` in the JSON, handle older versions in `importJSON`.
-
-**UI anchored to the caret.** `views/chat/components/FilePickerMenu.tsx:1-49`
-portals the menu with `position: "absolute"` positioned relative to an
-anchor element captured from the typeahead plugin's match result.
-`LexicalTypeaheadMenuPlugin` gives you that anchor; non-typeahead menus
-can read the DOM caret rect via `editor.getRootElement().ownerDocument.getSelection()`.
-
-**Serialization on cut / copy / paste.**
-- Copy: Lexical's default writes `application/x-lexical-editor` (JSON) +
-  `text/plain` to the clipboard. Don't override unless you need custom
-  pre-processing.
-- Paste: register `PASTE_COMMAND` at `COMMAND_PRIORITY_HIGH`, inspect
-  `event.clipboardData.types`. `views/chat/plugins/RichPastePlugin.tsx:22-51`
-  shows the pattern: if `application/x-lexical-editor` is present use
-  `$insertDataTransferForRichText()`; fall back to plaintext otherwise.
-- Server-side round-trip: `views/chat/lib/serialize.ts:48-62` walks the
-  tree to produce the `{ text, images, ... }` payload the agent sees.
-  Every new decorator node whose metadata matters to the agent must be
-  read in that walk — no exceptions.
-
-### CLI ↔ app transport (for when you edit the CLI itself)
-
-- App-side: `packages/init/src/main/services/cli.ts` — `CliService`
-  (public methods auto-exposed as `rpc.cli.*`). Writes
-  `~/.zenbu/.internal/runtime.json` on every evaluate with
-  `{ wsPort, dbPath, pid }`.
-- CLI-side: `packages/zen/src/lib/rpc.ts` — `connectCli()` reads
-  `runtime.json`, opens a WebSocket, calls `connectRpc<ServiceRouter>()`.
-  Returns `null` if the app isn't running; commands should fall back or
-  bail with a clear message.
-- To add a new CLI command that needs app state: add a method to
-  `CliService`, run `zen link`, call it from a new `packages/zen/src/commands/*.ts`
-  file via `conn.rpc.cli.yourMethod(...)`. Do not add hand-rolled socket
-  protocols.
-
-## Where specific functionality lives
-
-### Services (main process)
-`packages/init/src/main/services/` — every file is a `Service` subclass. Public
-methods are auto-exposed as RPC namespaced by `static key`. Hot-reloads via
-`runtime.register(Cls, import.meta.hot)` at the bottom of each file.
-
-| Concern | File |
-|---|---|
-| Database + sections + migration discovery | `db.ts` |
-| HTTP + WebSocket server | `server.ts`, `http.ts` |
-| Typed RPC auto-router | `rpc.ts` |
-| Electron windows, dock, menus | `window.ts` |
-| Vite dev servers for views | `reloader.ts` |
-| View ↔ scope registry | `view-registry.ts` |
-| The core (orchestrator+views) Vite server | `core-renderer.ts` |
-| Agent lifecycle, ACP proxying, first-prompt skill preamble | `agent.ts` |
-| Plugin installer (clones repo, runs setup.ts) | `installer.ts` |
-| Advice + content script config | `advice-config.ts` |
-| CLI RPC (`zen` commands ↔ running app over zenrpc) | `cli.ts`, `cli-intent.ts` |
-| Keyboard shortcuts (register, dispatch, per-scope routing) | `shortcut.ts`, `focus-shortcuts.ts` |
-| File scanner (non-gitignore-aware today) | `file-scanner.ts` |
-
-The Service base class + DAG initializer lives at
-`packages/init/src/main/runtime.ts`.
-
-### Renderer (orchestrator + views)
-`packages/init/src/renderer/`
-
-| Concern | Location |
-|---|---|
-| Orchestrator root UI (iframe host, tabs, panes) | `orchestrator/App.tsx` |
-| Chat view (scope `"chat"`: composer + log + minimap) | `views/chat/` (components, plugins, ChatDisplay.tsx, Composer.tsx) |
-| Minimap | `views/chat/components/MinimapContent.tsx` |
-| Settings view | `views/settings/` |
-| Shared hooks / providers (`useRpc`, `useDb`) | `lib/providers.ts`, `lib/ws-connection.ts` |
-| Frontend advice registration | `orchestrator/advice/` |
-
-Every view is a Vite-served page loaded in an iframe; it connects back to the
-kernel over a single WebSocket that multiplexes `{ ch: "rpc" }` and
-`{ ch: "db" }` frames.
-
-### Schema + DB
-- **Kernel schema** (sidebar, panes, views, modes, shortcut registry, chat, …):
-  `packages/init/shared/schema/index.ts`. Migrations in `packages/init/kyju/`.
-- **Agent schema** is authored in `packages/agent/src/schema.ts` and spread
-  into the kernel root via `agentSchemaFragment` — so `root.plugin.kernel.agents`,
-  `.agentConfigs`, `.archivedAgents`, `.hotAgentsCap`, `.skillRoots` all read
-  from the kernel section but the field definitions live in the agent package.
-- Third-party plugins get their own section at `root.plugin.<plugin-name>.*`
-  from their own `schema.ts`.
-- CLI: `zen kyju generate` (diff schema → new migration) and `zen kyju db <...>`
-  for inspection.
-- Kyju primitives live in `packages/kyju/src/v2/db/schema.ts` — `f.array`,
-  `f.record`, `f.collection`, `f.blob`, `makeCollection(...)` for preallocating
-  nested collection refs.
-
-### Agents
-- `packages/agent/src/agent.ts` — the `Agent` class (Effect-based lifecycle, ACP
-  session management, event log, first-prompt preamble latch).
-- `packages/agent/src/client.ts` — `AcpClient` (spawns subprocess, NDJSON).
-- `packages/agent/src/skills/` — skill discovery (open spec `SKILL.md`,
-  gitignore-aware) + routing-metadata formatter.
-- `packages/init/src/main/services/agent.ts` — `AgentService`: process registry,
-  config-option fanout, first-prompt latch (reads/writes `agent.firstPromptSentAt`
-  on the DB record), default `skillRoots → ~/.zenbu/skills`.
-
-### Advice + content scripts
-- Transform: `packages/advice/src/node-loader.ts`, `src/vite-plugin.ts`
-- Runtime: `packages/advice/src/runtime/`
-- Plugin API: `packages/init/src/main/services/advice-config.ts`
-  (`registerAdvice`, `registerContentScript`)
-
-### Modes
-- Schema fields: `majorMode: string`, `minorModes: string[]` on the kernel root.
-- Read/write from anywhere that has the DB client.
-
-## Philosophy — things that are load-bearing
-
-1. **Every module is hot-reloadable.** Avoid module-level mutable state; put it
-   in `Service` effects so cleanup runs on re-evaluation. Don't cache
-   import-time values that should change on edit.
-2. **Services wire themselves.** Don't write routers by hand; add a public
-   method to a `Service` and it's automatically RPC-accessible after
-   `zen link` regenerates types.
-3. **The DB is the bus.** Main ↔ renderer sync is through Kyju, not `ipcMain`.
-   If you need a view to react to main-process state, put it in the schema.
-4. **Plugins get equal footing with the kernel.** The kernel is a plugin; it
-   uses the same manifest + section system as third parties. Don't build
-   special paths that only the kernel can take.
-5. **Commit messages and code comments are instructions to future merge
-   agents.** Pulls that conflict will be resolved by an LLM reading the
-   history; explicit intent matters.
-
-## Portability
-
-- Zenbu ships its own `bun` + `pnpm` at `~/Library/Caches/Zenbu/bin/`.
-  Set by `bootstrapEnv` in `apps/kernel/src/shell/env-bootstrap.ts`.
-- Hard user-system deps: only Xcode Command Line Tools (git + bash).
-- User overrides: `ZENBU_BUN`, `ZENBU_PNPM`, `ZENBU_GIT` env vars.
-- All plugin `setup.ts` scripts inherit the isolated toolchain env.
-- Every plugin's `setup.ts` must be idempotent and use the `##ZENBU_STEP:`
-  protocol for progress reporting.
-
-## Conventions — things to do (or not) when editing
-
-- **Use `ni`** to install packages (auto-detects pnpm/npm/bun). Never run
-  `npm install` / `pnpm install` directly in a plugin dir — prefer
-  `zen setup` for plugin deps so the Relaunch bridge fires.
-- **Don't start the dev server** — assume the user already has it running.
-  Zenbu hot-reloads on file save, main process included. If you break a file,
-  the app breaks. Make incremental edits that leave the system in a valid state
-  at every save.
-- **Which zen command to run after a change** — see the "I want to … → run …"
-  table in the `zen` CLI section above.
-- Plugin registry lives at `packages/zenbu/registry.jsonl` (newline-delimited
-  JSON). To publish, PR a line with your plugin's git URL.
-
-## Known gaps / future work
-
-Documented at the bottom of `DOCS.md`:
-- Service `setup()` method for first-time plugin installation.
-- Commit-hash pinning in `registry.jsonl`.
-- Orchestrator slot system (so views declare where they render).
-- Dynamic code execution into a view's iframe (chrome.tabs.executeScript analog).
-- Agent-assisted merge conflict resolution on `git pull`.
+- Zenbu ships its own `bun` and `pnpm` at
+  `~/Library/Caches/Zenbu/bin/`. `apps/kernel/src/shell/env-bootstrap.ts`
+  exports `bootstrapEnv` which resolves them and exposes `ZENBU_BUN`,
+  `ZENBU_PNPM` for plugin scripts to use.
+- Hard system dependencies: only Xcode Command Line Tools (git, bash).
+- Override the toolchain via `ZENBU_BUN`, `ZENBU_PNPM`, `ZENBU_GIT`
+  env vars.
+- Every plugin `setup.ts` must be idempotent and use the
+  `##ZENBU_STEP:` protocol for progress reporting (so the UI can
+  show progress bars).

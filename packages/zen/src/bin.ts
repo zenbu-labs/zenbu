@@ -11,6 +11,7 @@ import { runConfig } from "./commands/config"
 import { runSetup } from "./commands/setup"
 import { runInit } from "./commands/init"
 import { runExec } from "./commands/exec"
+import { runProfile } from "./commands/profile"
 
 const SUBCOMMANDS = new Set([
   "kyju",
@@ -20,6 +21,7 @@ const SUBCOMMANDS = new Set([
   "setup",
   "init",
   "exec",
+  "profile",
   "help",
   "--help",
   "-h",
@@ -38,6 +40,8 @@ Usage:
   zen config <get|set> <key> [value]             Read/write CLI config
   zen init <plugin-name> [--dir <path>]          Scaffold a new plugin
   zen exec -e '<ts>' | zen exec <file.ts>        Run TS with rpc/events pre-opened
+  zen profile [--duration <ms>] [--out <path>]   CPU profile the kernel main process
+  zen profile heap [--out <path>]                Heap snapshot of the kernel main process
 `)
 }
 
@@ -77,6 +81,9 @@ async function main() {
       return
     case "exec":
       await runExec(rest)
+      return
+    case "profile":
+      await runProfile(rest)
       return
     case "help":
     case "--help":

@@ -290,6 +290,7 @@ export class CliService extends Service {
       RUNTIME_JSON,
       JSON.stringify({
         wsPort: this.ctx.http.port,
+        wsToken: this.ctx.http.authToken,
         dbPath: DB_PATH,
         pid: process.pid,
       }),

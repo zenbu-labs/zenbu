@@ -1,8 +1,8 @@
-import { useEffect, useRef } from "react"
-import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext"
-import { useKyjuClient } from "../../../lib/providers"
-import { getDraftFlush } from "./DraftPersistencePlugin"
-import { migrateLegacyNodesInEditorState } from "../../../../../shared/editor-state"
+import { useEffect, useRef } from "react";
+import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
+import { useKyjuClient } from "../../../lib/providers";
+import { getDraftFlush } from "./DraftPersistencePlugin";
+import { migrateLegacyNodesInEditorState } from "../../../../../shared/editor-state";
 
 /**
  * "Read-your-own-writes" for backgrounded composers. Because InsertService
@@ -23,77 +23,76 @@ import { migrateLegacyNodesInEditorState } from "../../../../../shared/editor-st
  * risk of local unsaved edits getting overwritten by step 2.
  */
 export function RefocusRehydratePlugin({ agentId }: { agentId: string }) {
-  const [editor] = useLexicalComposerContext()
-  const client = useKyjuClient()
-  const wasFocusedRef = useRef<boolean>(false)
-  const lastRehydratedKeyRef = useRef<string>("")
+  const [editor] = useLexicalComposerContext();
+  const client = useKyjuClient();
+  const wasFocusedRef = useRef<boolean>(false);
+  const lastRehydratedKeyRef = useRef<string>("");
 
   useEffect(() => {
-    if (typeof window === "undefined") return
+    if (typeof window === "undefined") return;
 
     const isFocused = () =>
-      typeof document !== "undefined" && document.hasFocus()
+      typeof document !== "undefined" && document.hasFocus();
 
     const rehydrate = () => {
-      const drafts = (client as any).plugin.kernel.composerDrafts.read() ?? {}
-      const state = drafts[agentId]?.editorState
-      if (!state || typeof state !== "object") return
-      const migrated = migrateLegacyNodesInEditorState(state)
-      const key = JSON.stringify(migrated)
+      const drafts = client.plugin.kernel.composerDrafts.read() ?? {};
+      const state = drafts[agentId]?.editorState;
+      if (!state || typeof state !== "object") return;
+      const migrated = migrateLegacyNodesInEditorState(state);
+      const key = JSON.stringify(migrated);
       // Skip replace when the draft matches what we already have — avoids
       // resetting caret/selection on every focus flicker.
-      if (key === lastRehydratedKeyRef.current) return
-      lastRehydratedKeyRef.current = key
+      if (key === lastRehydratedKeyRef.current) return;
+      lastRehydratedKeyRef.current = key;
       try {
-        const parsed = editor.parseEditorState(key)
-        editor.setEditorState(parsed)
+        const parsed = editor.parseEditorState(key);
+        editor.setEditorState(parsed);
       } catch (err) {
-        console.warn("[refocus-rehydrate] parse failed:", err)
+        console.warn("[refocus-rehydrate] parse failed:", err);
       }
-    }
+    };
 
     const onFocus = () => {
       if (!wasFocusedRef.current) {
-        wasFocusedRef.current = true
+        wasFocusedRef.current = true;
         // TODO(crdt): Coarse "reset to server truth" — replace the editor
         // state wholesale because we have no way to diff-and-apply remote
         // ops onto local state.
-        rehydrate()
+        rehydrate();
       }
-    }
+    };
 
     const onBlur = () => {
       if (wasFocusedRef.current) {
-        wasFocusedRef.current = false
+        wasFocusedRef.current = false;
         // TODO(crdt): Synchronous flush narrows but doesn't close the
         // race between the debounced write and an external writer.
-        const flush = getDraftFlush(agentId)
-        if (flush) flush()
+        const flush = getDraftFlush(agentId);
+        if (flush) flush();
         // Remember the baseline so we don't replace editor state on the
         // next focus if no one else wrote.
-        const drafts =
-          (client as any).plugin.kernel.composerDrafts.read() ?? {}
-        const state = drafts[agentId]?.editorState
-        lastRehydratedKeyRef.current = state ? JSON.stringify(state) : ""
+        const drafts = client.plugin.kernel.composerDrafts.read() ?? {};
+        const state = drafts[agentId]?.editorState;
+        lastRehydratedKeyRef.current = state ? JSON.stringify(state) : "";
       }
-    }
+    };
 
     // Prime the initial state — treat "already focused on mount" as if we
     // just focused, so the baseline is recorded.
-    wasFocusedRef.current = isFocused()
+    wasFocusedRef.current = isFocused();
     if (wasFocusedRef.current) {
-      const drafts = (client as any).plugin.kernel.composerDrafts.read() ?? {}
-      const state = drafts[agentId]?.editorState
-      lastRehydratedKeyRef.current = state ? JSON.stringify(state) : ""
+      const drafts = client.plugin.kernel.composerDrafts.read() ?? {};
+      const state = drafts[agentId]?.editorState;
+      lastRehydratedKeyRef.current = state ? JSON.stringify(state) : "";
     }
 
-    window.addEventListener("focus", onFocus)
-    window.addEventListener("blur", onBlur)
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
     return () => {
-      window.removeEventListener("focus", onFocus)
-      window.removeEventListener("blur", onBlur)
-    }
-  }, [editor, client, agentId])
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [editor, client, agentId]);
 
-  return null
+  return null;
 }

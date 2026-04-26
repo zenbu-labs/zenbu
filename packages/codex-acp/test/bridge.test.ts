@@ -1,5 +1,4 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { Effect } from "effect";
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -11,7 +10,7 @@ import { McpSocketServer } from "@zenbu/agent/src/mcp/server.ts";
 import { defineTools } from "@zenbu/agent/src/mcp/tools.ts";
 import { getMcpSocketPath } from "@zenbu/agent/src/mcp/socket-path.ts";
 import { writeProxyScript } from "@zenbu/agent/src/mcp/proxy-template.ts";
-import type { SessionNotification, SessionUpdate } from "@agentclientprotocol/sdk";
+import type { McpServer, SessionNotification, SessionUpdate } from "@agentclientprotocol/sdk";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -19,31 +18,25 @@ const bridgePath = join(__dirname, "..", "src", "index.ts");
 const CODEX_CONFIG_PATH = join(homedir(), ".codex", "config.toml");
 
 function createBridgeClient() {
-  return Effect.runPromise(
-    AcpClient.create({
-      command: "npx",
-      args: ["tsx", bridgePath],
-      cwd: process.cwd(),
-      handlers: {
-        requestPermission: async () => ({
-          outcome: { outcome: "selected" as const, optionId: "allow" },
-        }),
-      },
-    }),
-  );
+  return AcpClient.create({
+    command: "npx",
+    args: ["tsx", bridgePath],
+    cwd: process.cwd(),
+    handlers: {
+      requestPermission: async () => ({
+        outcome: { outcome: "selected" as const, optionId: "allow" },
+      }),
+    },
+  });
 }
 
 async function initAndCreateSession(client: AcpClient) {
-  await Effect.runPromise(
-    client.initialize({
-      protocolVersion: PROTOCOL_VERSION,
-      clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
-      clientInfo: { name: "spec-test", version: "0.0.1" },
-    }),
-  );
-  return Effect.runPromise(
-    client.newSession({ cwd: process.cwd(), mcpServers: [] }),
-  );
+  await client.initialize({
+    protocolVersion: PROTOCOL_VERSION,
+    clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
+    clientInfo: { name: "spec-test", version: "0.0.1" },
+  });
+  return client.newSession({ cwd: process.cwd(), mcpServers: [] });
 }
 
 async function promptAndCollectEvents(
@@ -53,9 +46,7 @@ async function promptAndCollectEvents(
 ) {
   const events: SessionNotification[] = [];
   client.onSessionUpdate((e) => events.push(e));
-  const result = await Effect.runPromise(
-    client.prompt({ sessionId, prompt: [{ type: "text", text }] }),
-  );
+  const result = await client.prompt({ sessionId, prompt: [{ type: "text", text }] });
   return { result, events };
 }
 
@@ -71,18 +62,16 @@ describe.skipIf(!codexAvailable)("codex-acp bridge spec compliance", () => {
   let client: AcpClient;
 
   afterEach(async () => {
-    if (client) await Effect.runPromise(client.close());
+    if (client) await client.close();
   });
 
   it("initialize returns valid protocol version and capabilities", async () => {
     client = await createBridgeClient();
-    const result = await Effect.runPromise(
-      client.initialize({
-        protocolVersion: PROTOCOL_VERSION,
-        clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
-        clientInfo: { name: "spec-test", version: "0.0.1" },
-      }),
-    );
+    const result = await client.initialize({
+      protocolVersion: PROTOCOL_VERSION,
+      clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
+      clientInfo: { name: "spec-test", version: "0.0.1" },
+    });
 
     expect(result.protocolVersion).toBe(PROTOCOL_VERSION);
     expect(result.agentCapabilities).toBeDefined();
@@ -215,6 +204,44 @@ describe.skipIf(!codexAvailable)("codex-acp bridge spec compliance", () => {
     }
   });
 
+  it("emits a tool_call_update when a bash command completes", async () => {
+    client = await createBridgeClient();
+    const session = await initAndCreateSession(client);
+    const { events } = await promptAndCollectEvents(
+      client,
+      session.sessionId,
+      "Use the bash tool to run exactly this command, then stop: printf codex-acp-bash-update-ok",
+    );
+
+    const toolStarts = events.filter(
+      (e): e is SessionNotification & {
+        update: Extract<SessionUpdate, { sessionUpdate: "tool_call" }>;
+      } =>
+        e.update.sessionUpdate === "tool_call" &&
+        e.update.kind === "execute",
+    );
+    const toolUpdates = events.filter(
+      (e): e is SessionNotification & {
+        update: Extract<SessionUpdate, { sessionUpdate: "tool_call_update" }>;
+      } =>
+        e.update.sessionUpdate === "tool_call_update" &&
+        e.update.toolCallId === toolStarts[0]?.update.toolCallId,
+    );
+
+    expect(toolStarts.length).toBeGreaterThan(0);
+    expect(toolUpdates.length).toBeGreaterThan(0);
+    expect(toolUpdates.some((e) => e.update.status === "completed")).toBe(true);
+    expect(
+      toolUpdates.some((e) =>
+        e.update.content?.some((item) =>
+          item.type === "content" &&
+          item.content.type === "text" &&
+          item.content.text.includes("codex-acp-bash-update-ok"),
+        ),
+      ),
+    ).toBe(true);
+  }, 120_000);
+
   it("injects stdio mcpServers into codex config.toml and cleans up on close", async () => {
     const testSocketPath = getMcpSocketPath("bridge-mcp-test");
     const mcpServer = new McpSocketServer();
@@ -235,33 +262,29 @@ describe.skipIf(!codexAvailable)("codex-acp bridge spec compliance", () => {
       const proxyPath = writeProxyScript(testSocketPath);
 
       client = await createBridgeClient();
-      await Effect.runPromise(
-        client.initialize({
-          protocolVersion: PROTOCOL_VERSION,
-          clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
-          clientInfo: { name: "mcp-test", version: "0.0.1" },
-        }),
-      );
+      await client.initialize({
+        protocolVersion: PROTOCOL_VERSION,
+        clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
+        clientInfo: { name: "mcp-test", version: "0.0.1" },
+      });
 
-      await Effect.runPromise(
-        client.newSession({
-          cwd: process.cwd(),
-          mcpServers: [
-            {
-              type: "stdio" as any,
-              name: "zenbu-tools",
-              command: "node",
-              args: [proxyPath],
-              env: [],
-            },
-          ] as any,
-        }),
-      );
+      await client.newSession({
+        cwd: process.cwd(),
+        mcpServers: [
+          {
+            type: "stdio",
+            name: "zenbu-tools",
+            command: "node",
+            args: [proxyPath],
+            env: [],
+          },
+        ] as unknown as McpServer[],
+      });
 
       const configContent = readFileSync(CODEX_CONFIG_PATH, "utf-8");
       expect(configContent).toContain("[mcp_servers.zenbu-tools]");
 
-      await Effect.runPromise(client.close());
+      await client.close();
       await new Promise((r) => setTimeout(r, 500));
 
       const afterClose = readFileSync(CODEX_CONFIG_PATH, "utf-8");

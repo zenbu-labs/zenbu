@@ -100,7 +100,7 @@ export function ReloadMenu({
     <div
       ref={rootRef}
       style={{ position: "absolute", bottom: "calc(100% + 8px)", left: 16 }}
-      className="z-50 min-w-[240px] max-w-[340px] overflow-hidden rounded-sm border border-neutral-300 bg-white shadow-xl"
+      className="z-50 min-w-[240px] max-w-[340px] overflow-hidden rounded-sm border border-border bg-popover text-popover-foreground shadow-xl"
     >
       <div className="max-h-[240px] overflow-y-auto p-0.5">
         {items.map((item, i) => (
@@ -111,8 +111,8 @@ export function ReloadMenu({
             aria-selected={highlighted === i}
             className={`flex w-full flex-col items-start gap-0.5 px-2 py-1.5 text-left text-xs rounded-[2px] ${
               highlighted === i
-                ? "bg-neutral-100 text-neutral-800"
-                : "text-neutral-500 hover:bg-neutral-100"
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             }`}
             onMouseEnter={() => setHighlighted(i)}
             onClick={() => {

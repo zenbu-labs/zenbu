@@ -1,13 +1,17 @@
 import { createServer, type ViteDevServer, type Plugin } from "vite"
 import { zenbuAdvicePlugin } from "@zenbu/advice/vite"
+import { createHash } from "node:crypto"
 import { dirname, join, resolve } from "node:path"
-import { readFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { createRequire } from "node:module"
 import { createServer as createNetServer } from "node:net"
+import { homedir } from "node:os"
 import { Service, runtime } from "../runtime"
 import { getAdvice, getAllScopes, getContentScripts, getAllContentScriptPaths } from "./advice-config"
 import type { ViewAdviceEntry } from "./advice-config"
+import type { DbService } from "./db"
+import { INTERNAL_DIR } from "../../../shared/paths"
 
 const REACT_GRAB_TOOLBAR_VISIBLE = false
 
@@ -18,12 +22,59 @@ const adviceRuntimeEntry = resolve(__dirname, "../../../../advice/src/runtime/in
 const kernelPackageRoot = resolve(__dirname, "../../..")
 
 interface RendererServerOptions {
+  id: string
   root: string
   port?: number
   configFile?: string | false
+  cacheDir?: string
   plugins?: any[]
   reactPlugin?: () => any
   resolve?: any
+}
+
+function safeCacheSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "renderer"
+}
+
+function resolveRendererCacheDir(options: RendererServerOptions): string {
+  const hash = createHash("sha256")
+    .update(options.id)
+    .update("\0")
+    .update(resolve(options.root))
+    .update("\0")
+    .update(options.configFile ? resolve(options.configFile) : "no-config")
+    .digest("hex")
+    .slice(0, 12)
+
+  return resolve(INTERNAL_DIR, "vite-cache", `${safeCacheSegment(options.id)}-${hash}`)
+}
+
+function rendererWarmupUrls(root: string): string[] {
+  const urls = new Set<string>()
+  if (existsSync(resolve(root, "main.tsx"))) {
+    urls.add("/main.tsx")
+  }
+
+  const viewsDir = resolve(root, "views")
+  try {
+    for (const entry of readdirSync(viewsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      if (existsSync(resolve(viewsDir, entry.name, "main.tsx"))) {
+        urls.add(`/views/${entry.name}/main.tsx`)
+      }
+    }
+  } catch {}
+
+  return [...urls]
+}
+
+async function warmupRendererEntrypoints(server: ViteDevServer, root: string): Promise<void> {
+  try {
+    await Promise.all(rendererWarmupUrls(root).map((url) => server.warmupRequest(url)))
+    await server.waitForRequestsIdle()
+  } catch (e) {
+    console.warn("[reloader] renderer warmup failed:", e)
+  }
 }
 
 function resolveReactGrabDir(root: string, configFile?: string | false): string | undefined {
@@ -104,13 +155,31 @@ function resolveAdviceRuntime(): Plugin {
   }
 }
 
-function getAdviceEntries(scope: string): ViewAdviceEntry[] {
-  return getAdvice(scope)
+function getAdviceEntries(scope: string, workspaceId?: string): ViewAdviceEntry[] {
+  return getAdvice(scope, workspaceId)
 }
 
 function getScopeFromPath(urlPath: string): string | null {
   const viewMatch = urlPath.match(/^\/views\/([^/]+)\//)
   return viewMatch ? viewMatch[1] : null
+}
+
+function parsePreludeId(id: string): { scope: string; workspaceId?: string } {
+  const rest = id.slice(RESOLVED_PREFIX.length)
+  const queryIdx = rest.indexOf("?")
+  if (queryIdx < 0) return { scope: rest }
+  const scope = rest.slice(0, queryIdx)
+  const params = new URLSearchParams(rest.slice(queryIdx + 1))
+  const workspaceId = params.get("workspaceId") ?? undefined
+  return { scope, workspaceId }
+}
+
+function extractWorkspaceIdFromUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined
+  const queryIdx = url.indexOf("?")
+  if (queryIdx < 0) return undefined
+  const params = new URLSearchParams(url.slice(queryIdx + 1))
+  return params.get("workspaceId") ?? undefined
 }
 
 function generatePreludeCode(entries: ViewAdviceEntry[]): string {
@@ -131,6 +200,8 @@ function generatePreludeCode(entries: ViewAdviceEntry[]): string {
 
 const PRELUDE_PREFIX = "/@advice-prelude/"
 const RESOLVED_PREFIX = "\0@advice-prelude/"
+const THEME_PREFIX = "/@zenbu-theme/"
+const GLOBAL_THEME_PATH = resolve(homedir(), ".zenbu", "theme.css")
 
 function advicePreludePlugin(): Plugin {
   return {
@@ -145,10 +216,10 @@ function advicePreludePlugin(): Plugin {
 
     load(id) {
       if (!id.startsWith(RESOLVED_PREFIX)) return null
-      const scope = id.slice(RESOLVED_PREFIX.length)
+      const { scope, workspaceId } = parsePreludeId(id)
 
-      let code = generatePreludeCode(getAdviceEntries(scope))
-      for (const scriptPath of getContentScripts(scope)) {
+      let code = generatePreludeCode(getAdviceEntries(scope, workspaceId))
+      for (const scriptPath of getContentScripts(scope, workspaceId)) {
         code += `import ${JSON.stringify(scriptPath)}\n`
       }
 
@@ -198,17 +269,104 @@ function advicePreludePlugin(): Plugin {
     transformIndexHtml(html, ctx) {
       const scope = getScopeFromPath(ctx.path ?? "")
       if (!scope) return html
-      const hasAdvice = getAdviceEntries(scope).length > 0
-      const hasScripts = getContentScripts(scope).length > 0
+      const workspaceId = extractWorkspaceIdFromUrl(ctx.originalUrl)
+      const hasAdvice = getAdviceEntries(scope, workspaceId).length > 0
+      const hasScripts = getContentScripts(scope, workspaceId).length > 0
       if (!hasAdvice && !hasScripts) return html
 
+      const src = workspaceId
+        ? `${PRELUDE_PREFIX}${scope}?workspaceId=${encodeURIComponent(workspaceId)}`
+        : `${PRELUDE_PREFIX}${scope}`
       return [
         {
           tag: "script",
-          attrs: { type: "module", src: `${PRELUDE_PREFIX}${scope}` },
+          attrs: { type: "module", src },
           injectTo: "head" as const,
         },
       ]
+    },
+  }
+}
+
+function readCssFile(filePath: string | null): string {
+  if (!filePath) return ""
+  try {
+    if (!existsSync(filePath)) return ""
+    return readFileSync(filePath, "utf-8")
+  } catch (err) {
+    console.error(`[theme] failed to read ${filePath}:`, err)
+    return ""
+  }
+}
+
+function resolveWorkspaceThemePath(workspaceId: string | undefined): string | null {
+  if (!workspaceId) return null
+  try {
+    const db = runtime.get<DbService>({ key: "db" })
+    const root = db.client.readRoot()
+    const workspace = root.plugin.kernel.workspaces?.find(
+      (w: { id: string }) => w.id === workspaceId,
+    )
+    for (const cwd of workspace?.cwds ?? []) {
+      const themePath = resolve(cwd, ".zenbu", "theme.css")
+      if (existsSync(themePath)) return themePath
+    }
+  } catch (err) {
+    console.error("[theme] failed to resolve workspace theme:", err)
+  }
+  return null
+}
+
+function themeStylesheetPlugin(): Plugin {
+  return {
+    name: "zenbu-theme-stylesheets",
+    enforce: "pre",
+
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = req.url ?? ""
+        if (!url.startsWith(THEME_PREFIX)) return next()
+
+        const parsed = new URL(url, "http://localhost")
+        let css = ""
+        if (parsed.pathname === `${THEME_PREFIX}global.css`) {
+          css = readCssFile(GLOBAL_THEME_PATH)
+        } else if (parsed.pathname === `${THEME_PREFIX}workspace.css`) {
+          const workspaceId = parsed.searchParams.get("workspaceId") ?? undefined
+          css = readCssFile(resolveWorkspaceThemePath(workspaceId))
+        } else {
+          return next()
+        }
+
+        res.statusCode = 200
+        res.setHeader("Content-Type", "text/css; charset=utf-8")
+        res.setHeader("Cache-Control", "no-cache")
+        res.end(css)
+      })
+    },
+
+    transformIndexHtml(_html, ctx) {
+      const tags = [
+        {
+          tag: "link",
+          attrs: { rel: "stylesheet", href: `${THEME_PREFIX}global.css` },
+          injectTo: "body" as const,
+        },
+      ]
+
+      const workspaceId = extractWorkspaceIdFromUrl(ctx.originalUrl)
+      if (workspaceId) {
+        tags.push({
+          tag: "link",
+          attrs: {
+            rel: "stylesheet",
+            href: `${THEME_PREFIX}workspace.css?workspaceId=${encodeURIComponent(workspaceId)}`,
+          },
+          injectTo: "body" as const,
+        })
+      }
+
+      return tags
     },
   }
 }
@@ -226,6 +384,7 @@ function getEphemeralPort(): Promise<number> {
 
 async function startRendererServer(options: RendererServerOptions): Promise<ViteDevServer> {
   const advicePlugins: any[] = [
+    themeStylesheetPlugin(),
     advicePreludePlugin(),
     // reactGrabPlugin(options.root, options.configFile),
     resolveAdviceRuntime(),
@@ -238,11 +397,16 @@ async function startRendererServer(options: RendererServerOptions): Promise<Vite
   let server: ViteDevServer
 
   const port = options.port || await getEphemeralPort()
+  const cacheDir = options.cacheDir ?? resolveRendererCacheDir(options)
+  mkdirSync(cacheDir, { recursive: true })
+
   const sharedConfig = {
+    cacheDir,
     server: {
       port,
       strictPort: true,
       hmr: { protocol: "ws", host: "localhost" } as const,
+      fs: { strict: false },
     },
     logLevel: "warn" as const,
   }
@@ -288,6 +452,8 @@ async function startRendererServer(options: RendererServerOptions): Promise<Vite
     }
   }
 
+  await warmupRendererEntrypoints(server, options.root)
+
   return server
 }
 
@@ -309,6 +475,7 @@ export class ReloaderService extends Service {
     if (this.servers.has(id)) return this.servers.get(id)!
 
     const viteServer = await startRendererServer({
+      id,
       root,
       configFile: configFile ?? false,
       port: 0,

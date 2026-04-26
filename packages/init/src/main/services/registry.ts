@@ -415,6 +415,54 @@ export class RegistryService extends Service {
       return { ok: false, error: message, log }
     }
   }
+
+  /**
+   * Uninstall a plugin by name. Always removes its line from the config
+   * (if present). With `deleteFiles: true`, also `rm -rf`s the plugin
+   * directory under `~/.zenbu/plugins/<name>/`.
+   *
+   * No-op + `ok: true` if the plugin isn't installed (config has no
+   * matching line and directory doesn't exist).
+   */
+  async uninstallPlugin(args: {
+    name: string
+    deleteFiles?: boolean
+  }): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!args.name) return { ok: false, error: "Missing name" }
+    try {
+      // Remove config entry (matches by manifestPath ending with the
+      // plugin dir name; kept conservative — only touches exact paths).
+      const dir = installPathFor(args.name)
+      const manifest = path.join(dir, "zenbu.plugin.json")
+      this.ctx.installer.removePluginFromConfig(manifest)
+
+      if (args.deleteFiles) {
+        if (fs.existsSync(dir)) {
+          // rm -rf equivalent, safe because `dir` is under PLUGINS_ROOT
+          // and is a plugin-named subdir.
+          if (path.relative(PLUGINS_ROOT, dir).startsWith("..")) {
+            return {
+              ok: false,
+              error: `Refusing to delete outside plugins root: ${dir}`,
+            }
+          }
+          fs.rmSync(dir, { recursive: true, force: true })
+        }
+      }
+      return { ok: true }
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      }
+    }
+  }
+
+  /** Absolute directory on disk for an installed plugin, or null. */
+  getInstalledPluginDir(name: string): string | null {
+    const dir = installPathFor(name)
+    return fs.existsSync(dir) ? dir : null
+  }
 }
 
 runtime.register(RegistryService, (import.meta as any).hot)

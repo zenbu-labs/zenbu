@@ -21,7 +21,6 @@ import { useRpc } from "../../../../../lib/providers";
 
 const MINIMAP =
   new URLSearchParams(window.location.search).get("minimap") === "true";
-const BUBBLE_BG = "rgb(255, 255, 255)";
 
 function PassthroughErrorBoundary({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
@@ -73,7 +72,7 @@ function ReadOnlyLexicalMessage({
     <LexicalComposer initialConfig={editorConfig}>
       <PlainTextPlugin
         contentEditable={
-          <ContentEditable className="outline-none whitespace-pre-wrap break-words leading-relaxed" />
+          <ContentEditable className="outline-none whitespace-pre-wrap wrap-break-word leading-relaxed" />
         }
         placeholder={null}
         ErrorBoundary={PassthroughErrorBoundary}
@@ -119,11 +118,10 @@ export function UserMessage({
   return (
     <div className="group/msg py-1">
       <div
-        className="group w-full rounded-lg border border-neutral-300 px-3 py-2 text-neutral-900"
+        className="group w-full rounded-lg border px-3 py-2 text-(--zenbu-user-message-foreground) border-(--zenbu-user-message-border)"
         onClick={!expanded && overflows ? () => setExpanded(true) : undefined}
         style={{
-          backgroundColor: BUBBLE_BG,
-          boxShadow: "0 1px 2px rgba(0, 0, 0, 0.03)",
+          backgroundColor: "var(--zenbu-user-message)",
           cursor: !expanded && overflows ? "pointer" : undefined,
         }}
       >
@@ -137,7 +135,7 @@ export function UserMessage({
             className={
               hasStructuredContent
                 ? ""
-                : "whitespace-pre-wrap break-words leading-relaxed"
+                : "whitespace-pre-wrap wrap-break-word leading-relaxed"
             }
           >
             {hasStructuredContent ? (
@@ -154,10 +152,11 @@ export function UserMessage({
             <div
               className="absolute inset-x-0 bottom-0 h-10"
               style={{
-                background: `linear-gradient(to top, ${BUBBLE_BG}, transparent)`,
+                background:
+                  "linear-gradient(to top, var(--zenbu-user-message), transparent)",
               }}
             >
-              <div className="absolute inset-x-0 -bottom-1 flex items-center justify-center text-neutral-500 opacity-0 transition-opacity group-hover:opacity-100">
+              <div className="absolute inset-x-0 -bottom-1 flex items-center justify-center text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
                 <svg
                   width="14"
                   height="14"
@@ -181,7 +180,7 @@ export function UserMessage({
               e.stopPropagation();
               setExpanded(false);
             }}
-            className="flex w-full items-center justify-center pt-1.5 text-neutral-500 hover:text-neutral-600 cursor-pointer"
+            className="flex w-full items-center justify-center pt-1.5 text-muted-foreground hover:text-foreground cursor-pointer"
           >
             <svg
               width="14"
@@ -203,7 +202,7 @@ export function UserMessage({
           <button
             type="button"
             onClick={handleCopy}
-            className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-neutral-400 hover:text-neutral-600 cursor-pointer rounded transition-colors"
+            className="flex items-center gap-1 px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer rounded transition-colors"
           >
             {copied ? (
               <svg

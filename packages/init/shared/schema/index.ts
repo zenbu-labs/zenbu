@@ -45,6 +45,20 @@ const windowStateSchema = zod.object({
   persisted: zod.boolean().default(false),
 });
 
+const workspaceIconSchema = zod.object({
+  blobId: zod.string(),
+  origin: zod.enum(["override", "scanned"]),
+  sourcePath: zod.string().nullable().default(null),
+});
+
+const workspaceSchema = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  cwds: zod.array(zod.string()).default([]),
+  createdAt: zod.number(),
+  icon: workspaceIconSchema.nullable().default(null),
+});
+
 export const MAIN_WINDOW_ID = "main";
 
 export const appSchema = createSchema({
@@ -124,9 +138,11 @@ export const appSchema = createSchema({
         url: zod.string(),
         port: zod.number(),
         icon: zod.string().optional(),
+        workspaceId: zod.string().optional(),
         meta: zod
           .object({
             kind: zod.string().optional(),
+            sidebar: zod.boolean().optional(),
           })
           .optional(),
       }),
@@ -192,6 +208,14 @@ export const appSchema = createSchema({
       }),
     )
     .default({}),
+  composerPending: f
+    .record(
+      zod.string(),
+      zod.object({
+        cwd: zod.string().optional(),
+      }),
+    )
+    .default({}),
   windowStates: f.array(windowStateSchema).default([]),
   majorMode: f.string().default("fundamental-mode"),
   minorModes: f.array(zod.string()).default([]),
@@ -246,6 +270,11 @@ export const appSchema = createSchema({
       lastCheckedAt: null,
       dismissedVersion: null,
     }),
+  workspaces: f.array(workspaceSchema).default([]),
+  activeWorkspaceByWindow: f.record(zod.string(), zod.string()).default({}),
+  sidebarOpenByWindow: f.record(zod.string(), zod.boolean()).default({}),
+  lastTabByWorkspace: f.record(zod.string(), zod.string()).default({}),
+  utilitySidebarSelectedByWindow: f.record(zod.string(), zod.string()).default({}),
 });
 
 export const schema = appSchema;

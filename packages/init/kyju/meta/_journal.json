@@ -155,6 +155,21 @@
       "idx": 30,
       "tag": "kernel_update_state",
       "when": 1776831798978
+    },
+    {
+      "idx": 31,
+      "tag": "composer_pending",
+      "when": 1777003576054
+    },
+    {
+      "idx": 32,
+      "tag": "migration",
+      "when": 1777022045222
+    },
+    {
+      "idx": 33,
+      "tag": "workspace_schema",
+      "when": 1777092319273
     }
   ]
 }

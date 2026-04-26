@@ -15,12 +15,14 @@ export function createRpcRouter() {
       send: (data: string) => void;
       postMessage: (data: string, clientId: string) => void;
       removeClient: (clientId: string) => void;
+      workspaceId?: string;
     }) {
       const clientId = nanoid();
       routes.set(clientId, opts.send);
 
       return {
         clientId,
+        workspaceId: opts.workspaceId,
         receive(data: string) {
           opts.postMessage(data, clientId);
         },

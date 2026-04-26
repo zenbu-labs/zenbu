@@ -209,7 +209,7 @@ function ConfigCombobox({
           aria-expanded={open}
           size="sm"
           className={cn(
-            "h-8 min-w-[7.5rem] max-w-[10rem] shrink-0 justify-between gap-1 px-2.5 font-normal text-xs text-neutral-600 shadow-none",
+            "h-8 min-w-30 max-w-40 shrink-0 justify-between gap-1 px-2.5 font-normal text-xs text-(--zenbu-composer-placeholder) hover:text-(--zenbu-composer-foreground) hover:bg-(--zenbu-control-hover) shadow-none",
             className,
           )}
           title={label}
@@ -283,7 +283,7 @@ function AgentConfigCombobox({
           role="combobox"
           aria-expanded={open}
           size="sm"
-          className="h-8 min-w-[7rem] max-w-[9rem] shrink-0 justify-between gap-1 px-2.5 font-normal text-xs text-neutral-600 shadow-none"
+          className="h-8 min-w-28 max-w-36 shrink-0 justify-between gap-1 px-2.5 font-normal text-xs text-(--zenbu-composer-placeholder) hover:text-(--zenbu-composer-foreground) hover:bg-(--zenbu-control-hover) shadow-none"
           title="Agent"
         >
           {current?.iconBlobId && (
@@ -343,12 +343,24 @@ export function Composer({
   debugExpectedVisibleMessageRef,
   slot,
   menuOpen,
+  onSubmit,
 }: {
   agentId: string;
   scrollToBottom?: () => void;
   debugExpectedVisibleMessageRef?: React.MutableRefObject<ExpectedVisibleMessage | null>;
   slot?: React.ReactNode;
   menuOpen?: boolean;
+  /**
+   * Override the default send path. When provided, Composer does its usual
+   * draft clear + streaming-interrupt handling, then hands the serialized
+   * message to `onSubmit` instead of writing to `eventLog` / calling
+   * `rpc.agent.send` itself. The caller owns both writes.
+   */
+  onSubmit?: (
+    text: string,
+    images: CollectedImage[],
+    editorStateJson: unknown,
+  ) => Promise<void>;
 }) {
   const filePickerOpenRef = useRef(false);
   const slashMenuOpenRef = useRef(false);
@@ -399,19 +411,31 @@ export function Composer({
 
       console.log('sending', text);
       
-      if (streaming) {
-        // Interrupt with prompt — server handles event log ordering
-        // (interrupted event, then user_prompt, then sends to agent)
+      // if (streaming) {
+      //   // Interrupt with prompt — server handles event log ordering
+      //   // (interrupted event, then user_prompt, then sends to agent)
+      //   try {
+      //     console.log('interrupt');
+
+      //     await rpc.agent.interrupt(
+      //       agentId,
+      //       text,
+      //       images.length > 0 ? images : undefined,
+      //     );
+      //   } catch (err) {
+      //     console.error("[composer] rpc.agent.interrupt failed", err);
+      //   }
+      //   if (images.length > 0) {
+      //     client.plugin.kernel.chatBlobs.set([]).catch(() => {});
+      //   }
+      //   return;
+      // }
+
+      if (onSubmit) {
         try {
-          console.log('interrupt');
-          
-          await rpc.agent.interrupt(
-            agentId,
-            text,
-            images.length > 0 ? images : undefined,
-          );
+          await onSubmit(text, images, editorStateJson);
         } catch (err) {
-          console.error("[composer] rpc.agent.interrupt failed", err);
+          console.error("[composer] onSubmit override failed", err);
         }
         if (images.length > 0) {
           client.plugin.kernel.chatBlobs.set([]).catch(() => {});
@@ -459,11 +483,13 @@ export function Composer({
         });
       }
 
+      const pending = client.plugin.kernel.composerPending.read()?.[agentId];
       try {
         await rpc.agent.send(
           agentId,
           text,
           images.length > 0 ? images : undefined,
+          pending?.cwd ? { cwd: pending.cwd } : undefined,
         );
       } catch (err) {
         console.error("[composer] rpc.agent.send failed", err);
@@ -473,7 +499,7 @@ export function Composer({
         client.plugin.kernel.chatBlobs.set([]).catch(() => {});
       }
     },
-    [rpc, agentId, client, streaming, debugExpectedVisibleMessageRef],
+    [rpc, agentId, client, streaming, debugExpectedVisibleMessageRef, onSubmit],
   );
 
   const handleConfigChange = useCallback(
@@ -505,7 +531,7 @@ export function Composer({
     <div className="mx-auto w-full max-w-[919px] px-4 pt-1 pb-3">
       <div
         ref={composerWrapperRef}
-        className="relative overflow-visible rounded-lg border border-neutral-300 bg-white/80"
+        className="relative overflow-visible rounded-lg border bg-(--zenbu-composer) text-(--zenbu-composer-foreground) border-(--zenbu-composer-border)"
       >
         <LexicalComposer
           key={`${_composerKey}-${agentId}`}
@@ -516,11 +542,11 @@ export function Composer({
               contentEditable={
                 <ContentEditable
                   spellCheck={false}
-                  className="min-h-[80px] max-h-[200px] overflow-y-auto px-5 pt-3 pb-3 text-sm outline-none"
+                  className="min-h-[80px] max-h-[200px] overflow-y-auto px-5 pt-3 pb-3 text-sm text-(--zenbu-composer-foreground) outline-none caret-(--zenbu-composer-foreground)"
                 />
               }
               placeholder={
-                <div className="pointer-events-none absolute top-3 left-5 text-sm text-neutral-500">
+                <div className="pointer-events-none absolute top-3 left-5 text-sm text-(--zenbu-composer-placeholder)">
                   / for commands, @ for context
                 </div>
               }
@@ -605,7 +631,7 @@ export function Composer({
             currentAgent?.thinkingLevel != null && (
               <ConfigCombobox
                 label="Thinking"
-                className="max-w-[11rem]"
+                className="max-w-44"
                 options={template.availableThinkingLevels}
                 currentValue={currentAgent.thinkingLevel}
                 onSelect={(v) => handleConfigChange("reasoning_effort", v)}
@@ -615,11 +641,11 @@ export function Composer({
           {streaming && (
             <button
               type="button"
-              className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-neutral-900 hover:bg-black"
+              className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground hover:opacity-85"
               onClick={handleInterrupt}
               title="Interrupt (Esc / Ctrl+C)"
             >
-              <div className="h-3 w-3 rounded-[2px] bg-white" />
+              <div className="h-3 w-3 rounded-[2px] bg-current" />
             </button>
           )}
         </div>

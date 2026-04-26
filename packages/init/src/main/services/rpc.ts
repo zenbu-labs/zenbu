@@ -48,7 +48,7 @@ export class RpcService extends Service {
         }
       >();
 
-      const onConnected = (id: string, ws: WebSocket) => {
+      const onConnected = (id: string, ws: WebSocket, meta: { workspaceId?: string }) => {
         const rpcConn = rpcRouter.connection({
           send: (data: string) => {
             if (ws.readyState === ws.OPEN) {
@@ -58,6 +58,9 @@ export class RpcService extends Service {
           postMessage: rpcServer.postMessage,
           removeClient: rpcServer.removeClient,
         });
+        if (meta.workspaceId) {
+          rpcServer.setClientMeta(rpcConn.clientId, { workspaceId: meta.workspaceId });
+        }
         wsRpcConnections.set(id, { rpcConn, ws });
 
         ws.on("message", (raw: Buffer) => {

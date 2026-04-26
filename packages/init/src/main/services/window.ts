@@ -397,7 +397,7 @@ export class WindowService extends Service {
         let screenshotDataUrl = "";
         if (coreEntry && chatRegistry) {
           const chatPath = new URL(chatRegistry.url).pathname;
-          const chatUrl = `http://localhost:${http.port}${chatPath}/index.html?agentId=${agentId}&wsPort=${http.port}`;
+          const chatUrl = `http://localhost:${http.port}${chatPath}/index.html?agentId=${agentId}&wsPort=${http.port}&wsToken=${encodeURIComponent(http.authToken)}`;
 
           const offscreen = new WebContentsView({
             webPreferences: {
@@ -732,7 +732,9 @@ export class WindowService extends Service {
         scrollTouchWebContents.on("scroll-touch-end", onScrollTouchEnd);
 
         const cwd = process.cwd();
-        const qs = `wsPort=${http.port}&cwd=${encodeURIComponent(
+        const qs = `wsPort=${http.port}&wsToken=${encodeURIComponent(
+          http.authToken,
+        )}&cwd=${encodeURIComponent(
           cwd,
         )}&defaultCwd=${encodeURIComponent(DEFAULT_CWD)}&webContentsId=${
           view.webContents.id

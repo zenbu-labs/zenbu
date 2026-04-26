@@ -4,6 +4,7 @@ import { resolveMethod, executeMethod } from "./execute";
 
 type ClientEntry = {
   clientId: string;
+  workspaceId?: string;
 };
 
 type CreateServerOptions<R = never> = {
@@ -54,7 +55,9 @@ export const createServer = <
           return;
         }
 
-        clients.set(clientId, { clientId });
+        const meta = clientMeta.get(clientId);
+        clientMeta.delete(clientId);
+        clients.set(clientId, { clientId, workspaceId: meta?.workspaceId });
 
         options.send(serialize({ type: "handshake-ack", ok: true }), clientId);
         break;
@@ -77,7 +80,18 @@ export const createServer = <
         try {
           const ctx: RpcContext = { clientId };
           const routerInstance = options.router(() => ctx);
-          const method = resolveMethod(routerInstance, msg.path);
+          const wsId = entry.workspaceId;
+          let method: Function;
+          if (wsId && msg.path.length >= 1) {
+            const scopedPath = [`${msg.path[0]}@@${wsId}`, ...msg.path.slice(1)];
+            try {
+              method = resolveMethod(routerInstance, scopedPath);
+            } catch {
+              method = resolveMethod(routerInstance, msg.path);
+            }
+          } else {
+            method = resolveMethod(routerInstance, msg.path);
+          }
           void executeMethod({
             method,
             methodArgs: msg.args,
@@ -107,6 +121,16 @@ export const createServer = <
     clients.delete(clientId);
   };
 
+  const setClientMeta = (clientId: string, meta: { workspaceId?: string }) => {
+    const entry = clients.get(clientId);
+    if (entry) {
+      entry.workspaceId = meta.workspaceId;
+    } else {
+      clientMeta.set(clientId, meta);
+    }
+  };
+  const clientMeta = new Map<string, { workspaceId?: string }>();
+
   type EmitProxy<T> = {
     [K in keyof T]: T[K] extends Record<string, any>
       ? EmitProxy<T[K]> & ((data: T[K]) => void)
@@ -128,5 +152,5 @@ export const createServer = <
       options.send(serialize({ type: "event", path, data }), clientId);
     });
 
-  return { postMessage, removeClient, emit, emitTo };
+  return { postMessage, removeClient, setClientMeta, emit, emitTo };
 };

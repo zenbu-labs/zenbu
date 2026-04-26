@@ -12,7 +12,6 @@ import {
 } from "react";
 import {
   SearchIcon,
-  SettingsIcon,
   RotateCwIcon,
   DownloadIcon,
   GitMergeIcon,
@@ -29,6 +28,7 @@ import {
 import type { WsConnectionState } from "../../lib/ws-connection";
 import { KyjuProvider, useDb, useCollection } from "../../lib/kyju-react";
 import { useKyjuClient, useRpc } from "../../lib/providers";
+import { DragRegionOverlay } from "../../lib/drag-region";
 import {
   Popover,
   PopoverContent,
@@ -48,14 +48,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu";
-import { LeafPane } from "./components/LeafPane";
-// SettingsDialog statically imports Streamdown which drags in shiki + ~40
-// syntax-highlighting themes (~3MB pre-parsed). Code-split it so the heavy
-// chunk only loads when the user opens settings — keeps first-paint lean.
-const SettingsDialog = lazy(() =>
-  import("./components/SettingsDialog").then((m) => ({ default: m.SettingsDialog })),
-);
-import { ReviewMode, type ReviewFileEntry } from "./components/ReviewMode";
 import {
   PluginUpdateModal,
   type PendingUpdate,
@@ -77,12 +69,16 @@ import {
   validSelectionFromTemplate,
   type ArchivedAgent,
 } from "../../../../shared/agent-ops";
+import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
+import { ViewCacheSlot } from "../../lib/view-cache";
 
 const params = new URLSearchParams(window.location.search);
 const wsPort = Number(params.get("wsPort"));
+const wsToken = params.get("wsToken") ?? "";
 const windowId = params.get("windowId");
 const defaultCwd = params.get("defaultCwd") ?? "";
 if (!windowId) throw new Error("Missing ?windowId= in orchestrator URL");
+if (!wsToken) throw new Error("Missing ?wsToken= in orchestrator URL");
 
 import type { SchemaRoot } from "../../../../shared/schema";
 
@@ -95,6 +91,36 @@ type ErrorFallbackRender = (args: {
   error: Error;
   reset: () => void;
 }) => ReactNode;
+
+const ORCHESTRATOR_WORKSPACE_THEME_LINK_ID =
+  "zenbu-orchestrator-workspace-theme";
+
+function useWorkspaceThemeLink(workspaceId: string | null | undefined) {
+  useEffect(() => {
+    const existing = document.getElementById(
+      ORCHESTRATOR_WORKSPACE_THEME_LINK_ID,
+    );
+
+    if (!workspaceId) {
+      existing?.remove();
+      return;
+    }
+
+    const link =
+      existing instanceof HTMLLinkElement
+        ? existing
+        : document.createElement("link");
+    link.id = ORCHESTRATOR_WORKSPACE_THEME_LINK_ID;
+    link.rel = "stylesheet";
+    link.href = `/@zenbu-theme/workspace.css?workspaceId=${encodeURIComponent(
+      workspaceId,
+    )}`;
+
+    if (!link.isConnected) {
+      document.body.appendChild(link);
+    }
+  }, [workspaceId]);
+}
 
 class ErrorBoundary extends Component<
   { children: ReactNode; scope: string; fallback: ErrorFallbackRender },
@@ -135,7 +161,7 @@ function FullErrorFallback({
   const [showStack, setShowStack] = useState(false);
 
   return (
-    <div className="flex h-full items-center justify-center bg-[#F4F4F4] p-8">
+    <div className="flex h-full items-center justify-center bg-(--zenbu-panel) p-8">
       <div className="flex max-w-lg flex-col gap-3 rounded-lg border border-red-200 bg-white p-6 shadow-sm">
         <div className="text-sm font-medium text-red-600">
           Something went wrong
@@ -170,17 +196,13 @@ function FullErrorFallback({
 function TitleBarErrorFallback({
   error,
   onReset,
-  hasTabs,
 }: {
   error: Error;
   onReset: () => void;
-  hasTabs: boolean;
 }) {
   return (
     <div
-      className={`flex h-9 shrink-0 items-center gap-2 px-3 ${
-        hasTabs ? "bg-[#E0E0E0]" : "bg-[#F4F4F4]"
-      }`}
+      className="flex h-9 shrink-0 items-center gap-2 px-3"
       style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
     >
       <div
@@ -240,6 +262,8 @@ function AgentPickerCombobox({
   onSelect: (agentId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const sortedAgents = useMemo(
     () =>
       [...agents]
@@ -250,17 +274,48 @@ function AgentPickerCombobox({
     [agents, openAgentIds],
   );
 
+  useEffect(() => {
+    if (!open) return;
+
+    const closeIfOutside = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (
+        target &&
+        (triggerRef.current?.contains(target) ||
+          contentRef.current?.contains(target))
+      ) {
+        return;
+      }
+      setOpen(false);
+    };
+
+    const closeOnWindowBlur = () => setOpen(false);
+
+    document.addEventListener("pointerdown", closeIfOutside, true);
+    window.addEventListener("blur", closeOnWindowBlur);
+    return () => {
+      document.removeEventListener("pointerdown", closeIfOutside, true);
+      window.removeEventListener("blur", closeOnWindowBlur);
+    };
+  }, [open]);
+
   return (
-    <Popover open={open} onOpenChange={setOpen} modal>
+    <Popover open={open} onOpenChange={setOpen} modal={true}>
       <PopoverTrigger asChild>
         <button
+          ref={triggerRef}
           className="flex h-6 items-center gap-1 rounded px-1.5 text-neutral-500 transition-colors hover:bg-black/10 hover:text-neutral-700 text-xs"
           title="Load agent"
         >
           <SearchIcon size={12} />
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-[280px] p-0 ml-2" align="start">
+      <PopoverContent
+        ref={contentRef}
+        className="w-[280px] p-0 ml-2"
+        align="start"
+        onInteractOutside={() => setOpen(false)}
+      >
         <Command>
           <CommandInput placeholder="Search agents..." />
           <CommandList>
@@ -313,6 +368,7 @@ type UpdateStatus =
 
 function ReloadMenu() {
   const rpc = useRpc();
+  const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [pullPending, setPullPending] = useState<"check" | "pull" | null>(null);
   const [reloadPending, setReloadPending] = useState(false);
@@ -347,6 +403,13 @@ function ReloadMenu() {
       } catch {}
     })();
   }, [rpc]);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnWindowBlur = () => setOpen(false);
+    window.addEventListener("blur", closeOnWindowBlur);
+    return () => window.removeEventListener("blur", closeOnWindowBlur);
+  }, [open]);
 
   const hasConflicts = status?.kind === "ok" && status.mergeable === false;
   const hasUpdates =
@@ -385,143 +448,191 @@ function ReloadMenu() {
     pullPending === "pull"
       ? "Pulling & installing…"
       : pullPending === "check"
-      ? "Checking…"
-      : hasConflicts
-      ? "Conflicts — resolve in Settings"
-      : transient === "updated"
-      ? "Updated!"
-      : transient === "up-to-date"
-      ? "Up to date"
-      : "Pull updates";
+        ? "Checking…"
+        : hasConflicts
+          ? "Conflicts — resolve in Settings"
+          : transient === "updated"
+            ? "Updated!"
+            : transient === "up-to-date"
+              ? "Up to date"
+              : "Pull updates";
 
   return (
     <>
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className="flex h-6 w-7 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-black/10 hover:text-neutral-700"
-          title="Reload"
+      <DropdownMenu open={open} onOpenChange={setOpen} modal={true}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="flex h-6 w-7 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-black/10 hover:text-neutral-700"
+            title="Reload"
+          >
+            <RotateCwIcon size={12} />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="start"
+          className="min-w-[200px] text-xs"
         >
-          <RotateCwIcon size={12} />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-[200px] text-xs">
-        <DropdownMenuItem
-          className="text-xs"
-          onClick={() => window.location.reload()}
-        >
-          <RotateCwIcon className="size-3" />
-          Reload window
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          className="text-xs"
-          disabled={reloadPending}
-          onSelect={(e) => {
-            e.preventDefault();
-            handleFullReload();
-          }}
-        >
-          <RefreshCwIcon className="size-3" />
-          {reloadPending ? "Reloading…" : "Full reload"}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          className="text-xs"
-          disabled={hasConflicts || pullPending !== null}
-          onSelect={(e) => {
-            e.preventDefault();
-            handlePullItem();
-          }}
-        >
-          {hasConflicts ? (
-            <GitMergeIcon className="size-3 text-red-500" />
-          ) : (
-            <DownloadIcon className="size-3" />
-          )}
-          <span className="flex-1">{pullLabel}</span>
-          {hasUpdates && pullPending === null && transient === null && (
-            <span className="size-1.5 rounded-full bg-blue-500" />
-          )}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-    {/*
+          <DropdownMenuItem
+            className="text-xs"
+            onClick={() => window.location.reload()}
+          >
+            <RotateCwIcon className="size-3" />
+            Reload window
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="text-xs"
+            disabled={reloadPending}
+            onSelect={(e) => {
+              e.preventDefault();
+              handleFullReload();
+            }}
+          >
+            <RefreshCwIcon className="size-3" />
+            {reloadPending ? "Reloading…" : "Full reload"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="text-xs"
+            disabled={hasConflicts || pullPending !== null}
+            onSelect={(e) => {
+              e.preventDefault();
+              handlePullItem();
+            }}
+          >
+            {hasConflicts ? (
+              <GitMergeIcon className="size-3 text-red-500" />
+            ) : (
+              <DownloadIcon className="size-3" />
+            )}
+            <span className="flex-1">{pullLabel}</span>
+            {hasUpdates && pullPending === null && transient === null && (
+              <span className="size-1.5 rounded-full bg-blue-500" />
+            )}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {/*
       The update modal is rendered as a SIBLING of `<DropdownMenu>`, not a
       child. Radix's `DropdownMenu` manages its own portal + focus trap;
       nesting a `Dialog` (which has its own portal + focus trap) inside
       causes z-index stacking and focus-management fights when the menu
       tries to close while the dialog is open.
     */}
-    <PluginUpdateModal
-      pending={pendingUpdate}
-      onResolved={() => setPendingUpdate(null)}
-      descriptionPending="A new version of Zenbu is ready. This will install the update and restart the app."
-    />
-    <CliRelaunchModal />
+      <PluginUpdateModal
+        pending={pendingUpdate}
+        onResolved={() => setPendingUpdate(null)}
+        descriptionPending="A new version of Zenbu is ready. This will install the update and restart the app."
+      />
+      <CliRelaunchModal />
     </>
   );
 }
 
 function TitleBar({
   agents,
-  hasTabs,
+  sidebarOpen,
+  onToggleSidebar,
   openAgentIds,
-  onSettings,
-  onNew,
   onLoadAgent,
+  workspaceLabel,
 }: {
   agents: AgentItem[];
-  hasTabs: boolean;
+  sidebarOpen: boolean;
+  onToggleSidebar: () => void;
   openAgentIds: Set<string>;
-  onSettings: () => void;
-  onNew: () => void;
   onLoadAgent: (agentId: string) => void;
+  workspaceLabel: string;
 }) {
   return (
     <div
-      className={`flex h-9 shrink-0 items-center ${
-        hasTabs ? "bg-[#E0E0E0]" : "bg-[#F4F4F4]"
-      }`}
-      style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+      className="shrink-0 relative flex items-center text-[13px]"
+      style={
+        {
+          height: 36,
+          background: "var(--zenbu-chrome)",
+          paddingLeft: 78,
+          paddingRight: 8,
+          WebkitAppRegion: "drag",
+        } as React.CSSProperties
+      }
     >
       <div
-        className="flex h-full shrink-0 items-center gap-1 pl-[74px]"
+        className="flex items-center gap-0.5 relative"
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
-        <ReloadMenu />
-        <button
-          onClick={onSettings}
-          className="flex h-6 w-7 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-black/10 hover:text-neutral-700"
-          title="Settings"
+        <UtilityIconButton
+          title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+          onClick={onToggleSidebar}
         >
-          <SettingsIcon size={14} />
-        </button>
+          <SidebarToggleIcon open={sidebarOpen} />
+        </UtilityIconButton>
+        <ReloadMenu />
         <AgentPickerCombobox
           agents={agents}
           openAgentIds={openAgentIds}
           onSelect={onLoadAgent}
         />
       </div>
-      <div className="flex flex-1 items-center justify-center" />
       <div
-        className="flex shrink-0 items-center justify-end gap-1 pr-2"
-        style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+        className="absolute inset-0 flex items-center justify-center pointer-events-none"
+        title={workspaceLabel}
       >
-        <TitleBarActions onNew={onNew} />
+        <span className="truncate max-w-[60%] text-[12px] text-neutral-600 font-medium px-2">
+          {workspaceLabel}
+        </span>
       </div>
     </div>
   );
 }
 
-function TitleBarActions({ onNew }: { onNew: () => void }) {
+function UtilityIconButton({
+  children,
+  title,
+  onClick,
+}: {
+  children: React.ReactNode;
+  title: string;
+  onClick: () => void;
+}) {
   return (
     <button
-      onClick={onNew}
-      className="flex h-6 w-7 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-black/10 hover:text-neutral-700"
-      title="New Chat"
+      type="button"
+      onClick={onClick}
+      title={title}
+      className="inline-flex items-center justify-center rounded text-neutral-500 cursor-pointer hover:bg-black/10 hover:text-neutral-700 transition-colors"
+      style={{ width: 22, height: 22 }}
     >
-      +
+      {children}
     </button>
+  );
+}
+
+function SidebarToggleIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <line x1="9" y1="3" x2="9" y2="21" />
+      {open && (
+        <rect
+          x="3"
+          y="3"
+          width="6"
+          height="18"
+          fill="currentColor"
+          fillOpacity="0.15"
+          stroke="none"
+        />
+      )}
+    </svg>
   );
 }
 
@@ -544,7 +655,6 @@ function OrchestratorContent() {
   const registry = useDb((root) => root.plugin.kernel.viewRegistry);
   const client = useKyjuClient();
   const rpc = useRpc();
-  // panes should of been deleted
   const paneState: PaneState = useMemo(
     () => ({
       panes: windowState?.panes ?? [],
@@ -554,15 +664,27 @@ function OrchestratorContent() {
     [windowState?.panes, windowState?.rootPaneId, windowState?.focusedPaneId],
   );
 
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<
-    "general" | "registry"
-  >("registry");
-  const [reviewEntries, setReviewEntries] = useState<ReviewFileEntry[] | null>(
-    null,
-  );
   const initializedRef = useRef(false);
   const ensuredRef = useRef(false);
+
+  const activeWorkspaceId = useDb(
+    (root) => root.plugin.kernel.activeWorkspaceByWindow?.[windowId!],
+  );
+  useWorkspaceThemeLink(activeWorkspaceId);
+
+  const workspaces = useDb((root) => root.plugin.kernel.workspaces);
+  const activeWorkspace = useMemo(
+    () => (workspaces ?? []).find((w) => w.id === activeWorkspaceId),
+    [workspaces, activeWorkspaceId],
+  );
+
+  const workspaceCwds = activeWorkspace?.cwds ?? [];
+
+  const sidebarOpen = useDb((root) => {
+    const map = root.plugin.kernel.sidebarOpenByWindow;
+    if (!map || typeof map[windowId!] !== "boolean") return true;
+    return map[windowId!];
+  });
 
   useEffect(() => {
     if (ensuredRef.current || !windowId) return;
@@ -580,8 +702,60 @@ function OrchestratorContent() {
         sidebarOpen: false,
         tabSidebarOpen: true,
         sidebarPanel: "overview",
+        persisted: false,
       },
     ]);
+  }, [client, allWindowStates]);
+
+  // One-shot cleanup on orchestrator mount: drop any `new-agent:*` and
+  // `scope:*` sentinel tabs left behind by prior sessions where the user
+  // opened the new-agent / plugins screen but never submitted. Without this,
+  // hundreds of orphans accumulate in pane.tabIds across restarts and each
+  // gets an iframe on render.
+  const cleanedRef = useRef(false);
+  useEffect(() => {
+    if (cleanedRef.current || !windowId) return;
+    const states = client.readRoot().plugin.kernel.windowStates ?? [];
+    const ws = states.find((w) => w.id === windowId);
+    if (!ws) return;
+    cleanedRef.current = true;
+
+    const isSentinel = (id: string) =>
+      id.startsWith("new-agent:") || id.startsWith("scope:");
+    const sessionIds = new Set(ws.sessions.map((s) => s.id));
+    let changed = false;
+    const cleanedSessions = ws.sessions.filter((s) => {
+      if (isSentinel(s.id)) {
+        changed = true;
+        return false;
+      }
+      return true;
+    });
+    const cleanedPanes = ws.panes.map((p) => {
+      if (p.type !== "leaf") return p;
+      const next = p.tabIds.filter((id) => {
+        if (isSentinel(id)) return false;
+        return sessionIds.has(id);
+      });
+      if (next.length === p.tabIds.length) return p;
+      changed = true;
+      const activeTabId = next.includes(p.activeTabId ?? "")
+        ? p.activeTabId
+        : next[next.length - 1];
+      return { ...p, tabIds: next, activeTabId };
+    });
+    if (!changed) return;
+    console.log(
+      `[orchestrator] cleanup: removed ${
+        ws.sessions.length - cleanedSessions.length
+      } sentinel session(s) + tabIds`,
+    );
+    const updatedStates = states.map((s) =>
+      s.id === windowId
+        ? { ...s, sessions: cleanedSessions, panes: cleanedPanes }
+        : s,
+    );
+    client.plugin.kernel.windowStates.set(updatedStates).catch(() => {});
   }, [client, allWindowStates]);
 
   const registryMap = useMemo(() => {
@@ -625,7 +799,6 @@ function OrchestratorContent() {
     const agentId = nanoid();
     const sessionId = nanoid();
 
-    // Inherit cwd from the focused agent (like terminal new tabs)
     const focusedPaneId =
       windowState?.focusedPaneId ?? windowState?.rootPaneId ?? null;
     const focusedPane = focusedPaneId
@@ -642,12 +815,8 @@ function OrchestratorContent() {
       typeof focusedAgent?.metadata?.cwd === "string"
         ? focusedAgent.metadata.cwd
         : undefined;
-    const newAgentCwd = inheritedCwd ?? defaultCwd;
+    const newAgentCwd = inheritedCwd ?? workspaceCwds[0] ?? defaultCwd;
 
-    // Seed from the template's defaultConfiguration — the user's most
-    // recent selections for this agent kind. Values that fell out of the
-    // availability lists get dropped; ACP will fill them on the first
-    // session handshake.
     const seeded = validSelectionFromTemplate(selectedConfig);
 
     let evicted: ArchivedAgent[] = [];
@@ -690,7 +859,7 @@ function OrchestratorContent() {
         console.error("[orchestrator] agent init failed:", e),
       );
     return sessionId;
-  }, [client, rpc, updateWindowState, windowState, sessions]);
+  }, [client, rpc, updateWindowState, windowState, sessions, workspaceCwds]);
 
   const createSessionForAgent = useCallback(
     async (agentId: string): Promise<string> => {
@@ -730,21 +899,45 @@ function OrchestratorContent() {
     writePaneState(initial);
   }, [paneState.rootPaneId, sessions, writePaneState]);
 
-  const handleNewTab = useCallback(async () => {
-    const paneId = paneState.rootPaneId;
-    if (!paneId) return;
-    const pane = paneState.panes.find((p) => p.id === paneId);
-    const oldActiveTabId = pane?.activeTabId;
-    const newSessionId = await createAgentAndSession();
-    const next = addTabToPane(paneState, paneId, newSessionId);
-    await writePaneState(next);
-    if (oldActiveTabId) {
-      await updateWindowState((ws) => {
-        const s = ws.sessions.find((s) => s.id === oldActiveTabId);
-        if (s) s.lastViewedAt = Date.now();
-      });
+  const handleNewAgent = useCallback(async () => {
+    const tabId = `new-agent:${nanoid()}`;
+    if (paneState.rootPaneId) {
+      const next = addTabToPane(paneState, paneState.rootPaneId, tabId);
+      await writePaneState(next);
+    } else {
+      const initial = initPaneState([tabId], tabId);
+      await writePaneState(initial);
     }
-  }, [paneState, createAgentAndSession, writePaneState, updateWindowState]);
+  }, [paneState, writePaneState]);
+
+  const handleOpenPlugins = useCallback(async () => {
+    // Reuse an existing plugins tab in this pane if there is one; otherwise
+    // insert a new sentinel tab. The tab id prefix `scope:plugins:` is what
+    // WorkspaceView's iframe routing keys off of to load the plugins view
+    // instead of chat.
+    const paneId = paneState.rootPaneId;
+    const pane = paneId ? paneState.panes.find((p) => p.id === paneId) : null;
+    const existing = pane?.tabIds.find((t) => t.startsWith("scope:plugins:"));
+    if (existing) {
+      const next = switchTabInPane(paneState, paneId!, existing);
+      await writePaneState(next);
+      return;
+    }
+    const tabId = `scope:plugins:${nanoid()}`;
+    await updateWindowState((ws) => {
+      ws.sessions = [
+        ...ws.sessions,
+        { id: tabId, agentId: "", lastViewedAt: null },
+      ];
+    });
+    if (paneId) {
+      const next = addTabToPane(paneState, paneId, tabId);
+      await writePaneState(next);
+    } else {
+      const initial = initPaneState([tabId], tabId);
+      await writePaneState(initial);
+    }
+  }, [paneState, writePaneState, updateWindowState]);
 
   const handleSwitchTab = useCallback(
     async (tabId: string) => {
@@ -796,59 +989,6 @@ function OrchestratorContent() {
     [paneState, removeSession, writePaneState],
   );
 
-  const handleTabContextMenu = useCallback(
-    async (tabId: string) => {
-      const paneId = paneState.rootPaneId;
-      if (!paneId) return;
-      const result = await rpc.window.showContextMenu([
-        { id: "close", label: "Close" },
-        { id: "move-to-new-window", label: "Move to New Window" },
-      ]);
-      if (result === "close") {
-        await handleCloseTab(tabId);
-      } else if (result === "move-to-new-window") {
-        const next = closeTabInPane(paneState, paneId, tabId);
-        await writePaneState(next);
-        await rpc.window.moveTabToNewWindow({
-          sourceWindowId: windowId!,
-          sessionId: tabId,
-        });
-      }
-    },
-    [windowId, handleCloseTab, rpc, paneState, writePaneState],
-  );
-
-  const handleTabTearOff = useCallback(
-    async (
-      tabId: string,
-      screenX: number,
-      screenY: number,
-    ): Promise<string | null> => {
-      const paneId = paneState.rootPaneId;
-      if (!paneId) return null;
-      const next = closeTabInPane(paneState, paneId, tabId);
-      writePaneState(next);
-      const result = await rpc.window.beginTabTearOff({
-        sourceWindowId: windowId!,
-        sessionId: tabId,
-        screenX,
-        screenY,
-      });
-      return result?.previewWindowId ?? null;
-    },
-    [windowId, paneState, writePaneState, rpc],
-  );
-
-  const handleNewGlobal = useCallback(async () => {
-    if (paneState.rootPaneId) {
-      await handleNewTab();
-    } else {
-      const sessionId = await createAgentAndSession();
-      const initial = initPaneState([sessionId], sessionId);
-      await writePaneState(initial);
-    }
-  }, [paneState, handleNewTab, createAgentAndSession, writePaneState]);
-
   const handleLoadAgent = useCallback(
     async (agentId: string) => {
       const sessionId = await createSessionForAgent(agentId);
@@ -872,120 +1012,156 @@ function OrchestratorContent() {
     [paneState, createSessionForAgent, writePaneState, updateWindowState],
   );
 
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "p") {
-        e.preventDefault();
-        setSettingsSection("registry");
-        setSettingsOpen((prev) => !prev);
+  const handleSelectWorkspace = useCallback(
+    async (workspaceId: string) => {
+      try {
+        await rpc.workspace.activateWorkspace(windowId!, workspaceId);
+      } catch (e) {
+        console.error("[orchestrator] activateWorkspace failed:", e);
       }
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
-  const hasTabs = paneState.panes.some(
-    (p) => p.type === "leaf" && p.tabIds.length > 1,
+    },
+    [rpc, windowId],
   );
 
-  const handleRequestReview = useCallback((entries: ReviewFileEntry[]) => {
-    setSettingsOpen(false);
-    setReviewEntries(entries);
-  }, []);
+  const toggleSidebar = useCallback(() => {
+    const map = client.plugin.kernel.sidebarOpenByWindow.read() ?? {};
+    const current = typeof map[windowId!] === "boolean" ? map[windowId!] : true;
+    client.plugin.kernel.sidebarOpenByWindow.set({
+      ...map,
+      [windowId!]: !current,
+    });
+  }, [client, windowId]);
 
   const rootFocusRef = useRef<HTMLDivElement>(null);
   useFocusOnRequest("orchestrator", () => {
-    // Blur whatever iframe currently has focus, then focus the orchestrator
-    // shell root. The root has tabIndex=-1 so it can receive focus
-    // programmatically without appearing in the normal tab order.
     (document.activeElement as HTMLElement | null)?.blur?.();
     rootFocusRef.current?.focus();
   });
+
+  const rootPane = useMemo(
+    () =>
+      paneState.panes.find(
+        (p) => p.id === paneState.rootPaneId && p.type === "leaf",
+      ) ?? null,
+    [paneState],
+  );
 
   return (
     <div
       ref={rootFocusRef}
       tabIndex={-1}
-      className="flex h-full flex-col bg-[#F4F4F4] outline-none"
+      className="flex h-full flex-col bg-(--zenbu-panel) outline-none"
     >
-      {settingsOpen && (
-        <Suspense fallback={null}>
-          <SettingsDialog
-            open={settingsOpen}
-            onOpenChange={setSettingsOpen}
-            initialSection={settingsSection}
-            onRequestReview={handleRequestReview}
-          />
-        </Suspense>
-      )}
-      {reviewEntries && (
-        <ReviewMode
-          entries={reviewEntries}
-          onClose={() => setReviewEntries(null)}
-        />
-      )}
       <ErrorBoundary
         scope="title-bar"
         fallback={({ error, reset }) => (
-          <TitleBarErrorFallback
-            error={error}
-            onReset={reset}
-            hasTabs={hasTabs}
-          />
+          <TitleBarErrorFallback error={error} onReset={reset} />
         )}
       >
         <TitleBar
           agents={agents}
-          hasTabs={hasTabs}
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={toggleSidebar}
           openAgentIds={openAgentIds}
-          onSettings={() => setSettingsOpen(true)}
-          onNew={handleNewGlobal}
           onLoadAgent={handleLoadAgent}
+          workspaceLabel={activeWorkspace?.name ?? ""}
         />
       </ErrorBoundary>
       <KernelBinaryUpdateBanner />
-      <div className="relative flex-1 min-h-0">
+      <div className="flex flex-row flex-1 min-h-0">
+        <WorkspaceSidebar
+          windowId={windowId!}
+          activeWorkspaceId={activeWorkspaceId ?? null}
+          onSelectWorkspace={handleSelectWorkspace}
+        />
         <ErrorBoundary
-          scope="tabs"
+          scope="workspace-view"
           fallback={({ error, reset }) => (
             <FullErrorFallback error={error} onReset={reset} />
           )}
         >
-          {(() => {
-            const rootPane = paneState.panes.find(
-              (p) => p.id === paneState.rootPaneId && p.type === "leaf",
-            );
-            if (rootPane) {
-              return (
-                <LeafPane
-                  pane={rootPane}
-                  agents={agents}
-                  sessions={sessions}
-                  registryMap={registryMap}
-                  wsPort={wsPort}
-                  windowId={windowId!}
-                  onSwitchTab={handleSwitchTab}
-                  onCloseTab={handleCloseTab}
-                  onCloseTabQuiet={handleCloseTabQuiet}
-                  onTabContextMenu={handleTabContextMenu}
-                  onTabTearOff={handleTabTearOff}
-                  onNewTab={handleNewTab}
-                />
-              );
-            }
-            return (
-              <div className="flex h-full items-center justify-center text-neutral-400 text-xs">
-                <button
-                  onClick={handleNewGlobal}
-                  className="px-3 py-1.5 rounded bg-neutral-200 hover:bg-neutral-300 text-neutral-600 transition-colors"
-                >
-                  + New Chat
-                </button>
-              </div>
-            );
-          })()}
+          <WorkspaceFrame
+            workspaceId={activeWorkspaceId ?? null}
+            registryMap={registryMap}
+            wsPort={wsPort}
+            wsToken={wsToken}
+            windowId={windowId!}
+          />
         </ErrorBoundary>
       </div>
+    </div>
+  );
+}
+
+function WorkspaceFrame({
+  workspaceId,
+  registryMap,
+  wsPort,
+  wsToken,
+  windowId,
+}: {
+  workspaceId: string | null;
+  registryMap: Map<string, RegistryEntry>;
+  wsPort: number;
+  wsToken: string;
+  windowId: string;
+}) {
+  const entry = registryMap.get("workspace");
+  if (!entry) {
+    return (
+      <div className="flex-1 min-w-0 min-h-0 flex items-center justify-center text-neutral-400 text-xs">
+        Workspace view not registered
+      </div>
+    );
+  }
+  if (!workspaceId) {
+    return (
+      <div className="flex-1 min-w-0 min-h-0 flex items-center justify-center text-neutral-400 text-xs">
+        {/* Pick or create a workspace */}
+      </div>
+    );
+  }
+  let entryPath = new URL(entry.url).pathname;
+  const ownsServer = entryPath === "/" || entryPath === "";
+  if (ownsServer) entryPath = "";
+  else if (entryPath.endsWith("/")) entryPath = entryPath.slice(0, -1);
+  const targetPort = ownsServer ? entry.port : wsPort;
+  const cacheKey = `workspace:${windowId}:${workspaceId}`;
+  // Unique subdomain per (window, workspace) so each workspace gets its
+  // own iframe Origin for cookies / localStorage / etc.
+  const raw = `ws-${windowId}-${workspaceId}`;
+  const hostname = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const src = `http://${hostname}.localhost:${targetPort}${entryPath}/index.html?wsPort=${wsPort}&wsToken=${encodeURIComponent(
+    wsToken,
+  )}&windowId=${encodeURIComponent(
+    windowId,
+  )}&workspaceId=${encodeURIComponent(workspaceId)}`;
+  return (
+    <div
+      className="flex-1 min-w-0 min-h-0 relative"
+      // Match the title bar / workspace sidebar so when the iframe's
+      // top-left corner is rounded, the pixel revealed behind it
+      // continues the L-shape chrome (title bar + sidebar) rather
+      // than showing the lighter panel background.
+      style={{ background: "var(--zenbu-chrome)" }}
+    >
+      <ViewCacheSlot
+        cacheKey={cacheKey}
+        src={src}
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+        }}
+        iframeStyle={{
+          borderTopLeftRadius: "8px",
+          borderTop: "1px solid var(--zenbu-panel-border)",
+          borderLeft: "1px solid var(--zenbu-panel-border)",
+          borderRight: "1px solid var(--zenbu-panel-border)",
+          boxSizing: "border-box",
+        }}
+      />
     </div>
   );
 }
@@ -1005,6 +1181,7 @@ function ConnectedApp({
           >
             <ShortcutForwarderProvider windowId={windowId!}>
               <OrchestratorContent />
+              <DragRegionOverlay />
             </ShortcutForwarderProvider>
           </KyjuProvider>
         </KyjuClientProvider>

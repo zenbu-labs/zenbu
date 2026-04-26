@@ -6,7 +6,7 @@ import { ServerService } from "./server"
 import { ReloaderService } from "./reloader"
 import type { Duplex } from "stream"
 
-type ConnectedCallback = (id: string, ws: WebSocket) => void
+type ConnectedCallback = (id: string, ws: WebSocket, meta: { workspaceId?: string }) => void
 type DisconnectedCallback = (id: string) => void
 
 type RequestHandler = (req: http.IncomingMessage, res: http.ServerResponse) => void
@@ -22,6 +22,7 @@ export class HttpService extends Service {
   private requestHandlers = new Map<string, RequestHandler>()
 
   get port() { return this.ctx.server.port }
+  get authToken() { return this.ctx.server.authToken }
 
   addRequestHandler(prefix: string, handler: RequestHandler): () => void {
     this.requestHandlers.set(prefix, handler)
@@ -126,16 +127,15 @@ export class HttpService extends Service {
     })
 
     this.setup("ws-dispatch", () => {
-      const onConnection = (ws: WebSocket) => {
+      const onConnection = (ws: WebSocket, req: http.IncomingMessage) => {
         const id = nanoid()
-        const elapsed = (performance.now() - startTime).toFixed(1)
-        console.log(`[http] ws connected: ${id} (${elapsed}ms since start)`)
+        const url = new URL(req.url ?? "/", "http://127.0.0.1")
+        const workspaceId = url.searchParams.get("workspaceId") ?? undefined
 
         this.activeConnections.set(id, ws)
-        for (const cb of this.connectedCallbacks) cb(id, ws)
+        for (const cb of this.connectedCallbacks) cb(id, ws, { workspaceId })
 
         ws.on("close", () => {
-          console.log(`[http] ws disconnected: ${id}`)
           this.activeConnections.delete(id)
           for (const cb of this.disconnectedCallbacks) cb(id)
         })

@@ -43,14 +43,22 @@ export function useWsConnection(): WsConnectionState {
     let cancelled = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const wsPort = new URLSearchParams(window.location.search).get("wsPort");
+    const params = new URLSearchParams(window.location.search);
+    const wsPort = params.get("wsPort");
+    const wsToken = params.get("wsToken");
 
     if (!wsPort) {
       setState({ status: "error", error: "Missing ?wsPort= in URL" });
       return;
     }
+    if (!wsToken) {
+      setState({ status: "error", error: "Missing ?wsToken= in URL" });
+      return;
+    }
 
-    const wsUrl = `ws://127.0.0.1:${wsPort}`;
+    const workspaceId = params.get("workspaceId");
+    let wsUrl = `ws://127.0.0.1:${wsPort}?token=${encodeURIComponent(wsToken)}`;
+    if (workspaceId) wsUrl += `&workspaceId=${encodeURIComponent(workspaceId)}`;
 
     function connect() {
       if (cancelled) return;

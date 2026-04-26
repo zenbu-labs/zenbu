@@ -4,11 +4,12 @@ import { useCollection, useDb } from "../../../lib/kyju-react";
 import { useRpc } from "../../../lib/providers";
 import { useShortcutIframeRegistry } from "../providers/shortcut-forwarder";
 import { useFocusOnRequest } from "../../../lib/focus-request";
+import { ViewCacheSlot, getCachedIframe } from "../../../lib/view-cache";
 import type { PaneNode } from "../pane-ops";
 import type { SchemaRoot } from "../../../../../shared/schema";
 
 type SessionItem = SchemaRoot["windowStates"][number]["sessions"][number];
-type AgentItem = SchemaRoot["agents"][string];
+type AgentItem = SchemaRoot["agents"][number];
 
 function useAgentEvents(agent: AgentItem | undefined) {
   const { items: events } = useCollection(agent?.eventLog);
@@ -258,8 +259,8 @@ function PaneTab({
       }}
       className={`group relative flex flex-1 items-center justify-center min-w-[120px] pl-7 pr-3 h-[48px] text-xs whitespace-nowrap overflow-hidden border-l border-r border-b ${
         isActive
-          ? "text-neutral-900 bg-[#F4F4F4] border-l-[#BDBDBD] border-r-[#BDBDBD] border-b-transparent"
-          : "text-neutral-500 hover:text-neutral-700 hover:bg-black/5 border-l-transparent border-r-transparent border-b-[#BDBDBD]"
+          ? "text-(--zenbu-panel-foreground) bg-(--zenbu-panel) border-l-(--zenbu-tab-border) border-r-(--zenbu-tab-border) border-b-transparent"
+          : "text-neutral-500 hover:text-neutral-700 hover:bg-black/5 border-l-transparent border-r-transparent border-b-(--zenbu-tab-border)"
       }`}
     >
       {showSweep && (
@@ -268,7 +269,7 @@ function PaneTab({
             fadeOut ? "opacity-0" : "opacity-100"
           }`}
         >
-          <div className="h-full w-[40%] animate-[tab-sweep_2.2s_ease-in-out_infinite] rounded-full bg-gradient-to-r from-transparent via-blue-400 to-transparent" />
+          <div className="h-full w-[40%] animate-[tab-sweep_2.2s_ease-in-out_infinite] rounded-full bg-linear-to-r from-transparent via-blue-400 to-transparent" />
         </div>
       )}
       <span
@@ -285,7 +286,7 @@ function PaneTab({
         <span className="mr-1.5 size-[6px] shrink-0 rounded-full bg-blue-500" />
       )}
       {isGeneratingTitle ? (
-        <span className="inline-block w-20 h-3 rounded-sm bg-[length:200%_100%] bg-gradient-to-r from-neutral-200 via-neutral-100 to-neutral-200 text-shimmer" />
+        <span className="inline-block w-20 h-3 rounded-sm bg-size-[200%_100%] bg-linear-to-r from-neutral-200 via-neutral-100 to-neutral-200 text-shimmer" />
       ) : (
         <span className="truncate text-center">{label}</span>
       )}
@@ -304,6 +305,7 @@ export function LeafPane({
   sessions,
   registryMap,
   wsPort,
+  wsToken,
   windowId,
   onSwitchTab,
   onCloseTab,
@@ -317,6 +319,7 @@ export function LeafPane({
   sessions: SessionItem[];
   registryMap: Map<string, { scope: string; url: string; port: number }>;
   wsPort: number;
+  wsToken: string;
   windowId: string;
   onSwitchTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
@@ -332,12 +335,12 @@ export function LeafPane({
   const chatEntry = registryMap.get("chat");
   const showHeader = pane.tabIds.length > 1;
   const tabRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
-  const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
+  const knownTabIds = useRef<Set<string>>(new Set());
   const shortcutIframes = useShortcutIframeRegistry();
 
   useEffect(() => {
     return () => {
-      for (const tabId of iframeRefs.current.keys()) {
+      for (const tabId of knownTabIds.current) {
         shortcutIframes.unregister(tabId);
       }
     };
@@ -346,9 +349,8 @@ export function LeafPane({
   const activeTabIdForFocus = pane.activeTabId;
   useFocusOnRequest("active-view", () => {
     if (!activeTabIdForFocus) return;
-    const iframe = iframeRefs.current.get(activeTabIdForFocus);
+    const iframe = getCachedIframe(activeTabIdForFocus);
     iframe?.focus();
-    // Also nudge focus into the iframe's document so keydowns route there.
     iframe?.contentWindow?.focus();
   });
 
@@ -367,29 +369,25 @@ export function LeafPane({
         block: "nearest",
         inline: "nearest",
       });
-      const iframe = iframeRefs.current.get(pane.activeTabId!);
+      const iframe = getCachedIframe(pane.activeTabId!);
       iframe?.focus();
     });
   }, [pane.activeTabId]);
 
-  // TODO: this will be removed when focus system is implemented
   const activeTabIdRef = useRef(pane.activeTabId);
   activeTabIdRef.current = pane.activeTabId;
   useEffect(() => {
     function onMessage(e: MessageEvent) {
       if (e.data?.type !== "zenbu-iframe-ready") return;
-      for (const [tabId, iframe] of iframeRefs.current) {
-        if (
-          iframe.contentWindow === e.source &&
-          tabId === activeTabIdRef.current
-        ) {
-          iframe.focus();
-          iframe.contentWindow?.postMessage(
-            { type: "zenbu-focus-editor" },
-            "*",
-          );
-          break;
-        }
+      const activeId = activeTabIdRef.current;
+      if (!activeId) return;
+      const iframe = getCachedIframe(activeId);
+      if (iframe?.contentWindow === e.source) {
+        iframe.focus();
+        iframe.contentWindow?.postMessage(
+          { type: "zenbu-focus-editor" },
+          "*",
+        );
       }
     }
     window.addEventListener("message", onMessage);
@@ -406,7 +404,7 @@ export function LeafPane({
   return (
     <div className="flex h-full flex-col min-h-0 min-w-0">
       {showHeader && (
-        <div className="flex items-center bg-[#E0E0E0] border-t border-[#BDBDBD] select-none shrink-0">
+        <div className="flex items-center bg-(--zenbu-chrome) border-t border-(--zenbu-tab-border) select-none shrink-0">
           <div className="flex items-center min-w-0 flex-1 overflow-x-auto [scrollbar-width:thin] [scrollbar-color:var(--color-neutral-400)_transparent]">
             {pane.tabIds.map((tabId) => (
               <PaneTab
@@ -435,29 +433,41 @@ export function LeafPane({
         {pane.activeTabId && chatEntry ? (
           tabsToRender.map((tabId) => {
             const session = sessions.find((s) => s.id === tabId);
+            // Tabs whose id is `scope:<name>:<nanoid>` route to a
+            // non-chat scope. Plugins use this to reserve a tab slot for
+            // their own views (e.g. agent-sidebar's "new-agent:" sentinel).
+            const scopeMatch = /^scope:([^:]+):/.exec(tabId) ?? (
+              tabId.startsWith("new-agent:") ? ["", "new-agent"] : null
+            );
+            const scope = scopeMatch?.[1] ?? "chat";
+            const entry = scope === "chat" ? chatEntry : registryMap.get(scope);
+            if (!entry) return null;
+            let entryPath = new URL(entry.url).pathname;
+            const ownsServer = entryPath === "/" || entryPath === "";
+            if (ownsServer) entryPath = "";
+            else if (entryPath.endsWith("/")) entryPath = entryPath.slice(0, -1);
+            // Aliased views (e.g. "chat") proxy through the kernel's wsPort.
+            // Own-server views (e.g. "new-agent") go directly to their
+            // plugin's Vite port — the kernel HTTP proxy only routes to core.
+            const targetPort = ownsServer ? entry.port : wsPort;
             const agentId = session?.agentId ?? tabId;
             const hostname = tabId.toLowerCase().replace(/[^a-z0-9]/g, "");
+            const src = `http://${hostname}.localhost:${targetPort}${entryPath}/index.html?agentId=${encodeURIComponent(agentId)}&wsPort=${wsPort}&wsToken=${encodeURIComponent(wsToken)}&windowId=${encodeURIComponent(windowId)}&paneId=${encodeURIComponent(pane.id)}`;
+            knownTabIds.current.add(tabId);
+            const isActive = tabId === pane.activeTabId;
             return (
-              <iframe
+              <ViewCacheSlot
                 key={tabId}
-                ref={(el) => {
-                  if (el) iframeRefs.current.set(tabId, el);
-                  else iframeRefs.current.delete(tabId);
-                }}
-                onLoad={(e) => {
-                  const win = (e.currentTarget as HTMLIFrameElement)
-                    .contentWindow;
-                  if (win) shortcutIframes.register(tabId, win);
-                }}
-                // src={`${chatEntry.url}/index.html?agentId=${agentId}&wsPort=${wsPort}`}
-                src={`http://${hostname}.localhost:${wsPort}${chatPath}/index.html?agentId=${agentId}&wsPort=${wsPort}&windowId=${encodeURIComponent(windowId)}&paneId=${encodeURIComponent(pane.id)}`}
-                className="border-none"
+                cacheKey={tabId}
+                src={src}
+                hidden={!isActive}
+                onLoad={(win) => shortcutIframes.register(tabId, win)}
                 style={{
                   position: "absolute",
                   inset: 0,
                   width: "100%",
                   height: "100%",
-                  display: tabId !== pane.activeTabId ? "none" : "block",
+                  display: isActive ? "block" : "none",
                 }}
               />
             );

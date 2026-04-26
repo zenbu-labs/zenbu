@@ -1,0 +1,18 @@
+@import "tailwindcss";
+@import "./shadcn.css";
+@import "./chat.css";
+
+@source "../../../node_modules/streamdown/dist";
+@source "../../../node_modules/@streamdown/code/dist";
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  color: var(--foreground);
+  background: var(--zenbu-panel);
+}

@@ -33,7 +33,7 @@ export function MinimapContent({ agentId }: { agentId: string }) {
   }, [])
 
   return (
-    <div ref={containerRef} className="bg-[#F4F4F4]">
+    <div ref={containerRef} className="bg-(--zenbu-panel)">
       <MessageList
         messages={messages}
         loading={streaming}

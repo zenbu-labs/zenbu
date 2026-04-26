@@ -304,7 +304,35 @@ export class AgentService extends Service {
     }
   }
 
-  async send(agentId: string, text: string, images?: ImageRef[]) {
+  async send(
+    agentId: string,
+    text: string,
+    images?: ImageRef[],
+    opts?: { cwd?: string },
+  ) {
+    // Apply any pending config (cwd today; model/thinkingLevel/mode later)
+    // before resolving the process, so `ensureProcess` sees the new cwd.
+    if (opts?.cwd) {
+      const current = this.ctx.db.client
+        .readRoot()
+        .plugin.kernel.agents.find((a) => a.id === agentId);
+      if (current?.metadata?.cwd !== opts.cwd) {
+        await this.changeCwd(agentId, opts.cwd);
+      }
+    }
+
+    // Clear pending state for this agent — the send consumes it.
+    await this.ctx.db.client
+      .update((root) => {
+        const pending = root.plugin.kernel.composerPending;
+        if (pending[agentId]) {
+          const next = { ...pending };
+          delete next[agentId];
+          root.plugin.kernel.composerPending = next;
+        }
+      })
+      .catch(() => {});
+
     const agent = await this.ensureProcess(agentId);
 
     // "First message" = the agent's first-prompt latch hasn't fired yet,
